@@ -1,0 +1,108 @@
+name: Release aether-cli
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest,  target: x86_64-unknown-linux-gnu,    pkg: tar.gz }
+          - { os: macos-latest,   target: x86_64-apple-darwin,         pkg: tar.gz }
+          - { os: macos-latest,   target: aarch64-apple-darwin,        pkg: tar.gz }
+          - { os: windows-latest, target: x86_64-pc-windows-msvc,      pkg: zip }
+          # NOTE: arm64 Linux + arm64 Windows skipped — libusb cross-compile
+          # and MSVC ARM64 tooling are both fragile in CI. Add back later
+          # using `cross` or self-hosted runners once stable demand exists.
+
+    defaults:
+      run:
+        working-directory: aether-cli
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            aether-cli/target
+          key: ${{ runner.os }}-cargo-${{ matrix.target }}-${{ hashFiles('aether-cli/Cargo.lock', 'aether-cli/Cargo.toml') }}
+
+      - name: Install libusb (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libusb-1.0-0-dev libudev-dev pkg-config
+
+      - name: Install libusb (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libusb pkg-config
+
+      - name: Install libusb (Windows via vcpkg)
+        if: runner.os == 'Windows'
+        run: |
+          vcpkg install libusb:x64-windows-static-md
+          echo "VCPKG_ROOT=$env:VCPKG_INSTALLATION_ROOT" >> $env:GITHUB_ENV
+          echo "RUSTFLAGS=-C target-feature=+crt-static" >> $env:GITHUB_ENV
+
+      - name: Build
+        run: cargo build --release --target ${{ matrix.target }}
+
+      - name: Package (tar.gz)
+        if: matrix.pkg == 'tar.gz'
+        run: |
+          mkdir -p dist
+          cp target/${{ matrix.target }}/release/aether-cli dist/aether-cli
+          cp README.md dist/
+          tar -czf ../aether-cli-${{ matrix.target }}.tar.gz -C dist .
+
+      - name: Package (zip)
+        if: matrix.pkg == 'zip'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/${{ matrix.target }}/release/aether-cli.exe dist/aether-cli.exe
+          Copy-Item README.md dist/README.md
+          Compress-Archive -Path dist/* -DestinationPath ../aether-cli-${{ matrix.target }}.zip -Force
+
+      - name: Upload artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: aether-cli-${{ matrix.target }}
+          path: |
+            aether-cli-${{ matrix.target }}.tar.gz
+            aether-cli-${{ matrix.target }}.zip
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/aether-cli-*.*
+          generate_release_notes: true

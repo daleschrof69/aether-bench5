@@ -1,0 +1,36 @@
+{
+  "summary": "Verified P2 fixes from iteration_2. 4 of 5 fixes PASS: FIX 2 (login error), FIX 3 (signup error), FIX 4 (shared release constants), FIX 5 (CLI install command). FIX 1 (GetDesktopHeroCard mobile layout) is INCOMPLETE — flex-col md:flex-row was correctly added to the inner card, but the root cause of the letter-by-letter wrap is that the dashboard sidebar (~240px) does NOT collapse on mobile/tablet viewports, leaving main content only ~103px at 375px and the hero card title still wraps badly. All 3 P0 regressions (admin login, popovers, sidebar nav x8) still pass.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "App layout / Sidebar", "issue": "Sidebar (aside, 240px wide) is visible and non-collapsible at 375px AND 768px viewports. Main content is squeezed to ~103px at 375px and ~500px at 768px. This causes GetDesktopHeroCard title 'GET AETHER FOR WINDOWS' to still wrap letter-by-letter at 375px and word-by-word at 768px — even though the card's own flex-col md:flex-row fix was applied correctly. The fix needs to be at the Layout level (collapse/hide sidebar below md or lg breakpoint, OR provide a hamburger drawer).", "selector": "aside, [data-testid=\"get-desktop-hero\"] h3", "priority": "P2"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard at 375px", "issues": ["Sidebar consumes 240px of 375px viewport, leaving ~135px for main content — entire dashboard is unusable on mobile (hero title wraps letter-by-letter, demo mode banner same, all cards stack into narrow column)."]},
+      {"screen": "Dashboard at 768px", "issues": ["Sidebar still visible (240px). Hero title still wraps to 4+ lines because md:flex-row activates exactly at 768px and right-side button group takes ~270px, leaving only ~150px for title."]}
+    ]
+  },
+  "test_report_links": ["/app/test_reports/iteration_3.json"],
+  "action_items": [
+    "P1 — Fix dashboard layout to collapse/hide the sidebar below md (or lg) breakpoint. Add a mobile hamburger toggle. This is the ACTUAL root cause of the hero-card letter-wrap (the card's own responsive classes are correct, but its container is too narrow).",
+    "Alternative quick fix: change GetDesktopHeroCard breakpoint from `md:flex-row` to `lg:flex-row` and `md:w-auto` to `lg:w-auto` so the card stays stacked until 1024px. Still leaves the broader sidebar-on-mobile issue.",
+    "FIX 2 (login error), FIX 3 (signup error), FIX 4 (shared releases.js), FIX 5 (CLI installCmd) all verified working — no further action.",
+    "Optional regression script improvement: Desktop popover platform-build data-testids could not be auto-discovered by my selector pattern; recommend the desktop popover use the same data-testid pattern as CLI (e.g. desktop-download-{platform})."
+  ],
+  "critical_code_review_comments": [
+    "lib/releases.js correctly centralizes version/URL constants; DownloadDesktopButton, DownloadCliButton, GetDesktopHeroCard all import from it. ✓",
+    "DownloadCliButton installCmd now correctly uses GitHub Release URL via PowerShell iwr (no more get.aether.sh ghost host). ✓",
+    "Login & Signup error elements now have data-testid + role='alert' + class='error' (visible, accessible). ✓",
+    "However GetDesktopHeroCard's flex-col md:flex-row is necessary but NOT SUFFICIENT — the dashboard parent layout still presents the sidebar at all viewports. The card cannot lay itself out properly when its container is 103px wide. This is a Layout.jsx / Sidebar.jsx concern, not a card concern.",
+    "All 8 sidebar routes render content (>200 chars). No console errors introduced by responsive changes (only the pre-existing /api/auth/me 401 noise noted in iteration_2)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not retested (was 100% iter_2)", "frontend": "FIX 1 broken root-cause, FIX 2-5 PASS = 4/5 = 80%; regressions 100%"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 confirmed.",
+  "seed_data_creation": "None.",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "FIX 1 root cause clarified: it's the sidebar, not the hero card. Hero card's flex-col md:flex-row is in place at line 58 of GetDesktopHeroCard.jsx. The real fix lives in Layout.jsx / Sidebar.jsx — collapse sidebar below lg (1024px) and add a drawer toggle. After main agent applies the layout fix, re-test at 375/768/1024/1920 verifying: (a) sidebar hides/drawer at <lg, (b) hero card width matches viewport at 375, (c) title 'GET AETHER FOR WINDOWS' fits on 1-2 lines at 375px. Other 4 fixes are confirmed shipping-ready.",
+  "rca_of_the_issue": "GetDesktopHeroCard mobile bug — Root Cause Update: The card's own flex-col md:flex-row fix is correctly applied. BUT the dashboard layout always renders a 240px fixed sidebar at every viewport (no md: breakpoint to hide it). At 375px viewport: 375 - 240 (sidebar) = ~135px for main content area, with px-4 padding the hero card becomes 103px wide. At this width even a perfectly responsive flex-col card cannot avoid letter-by-letter title wrap. Reproduction: login as admin → resize to 375px → observe sidebar still occupies left third. Mitigation: in Layout.jsx wrap `<aside>` with `hidden lg:flex` (or `hidden md:flex`) and add a mobile drawer triggered by a hamburger button in the header."
+}

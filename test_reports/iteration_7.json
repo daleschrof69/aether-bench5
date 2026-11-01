@@ -1,0 +1,28 @@
+{
+  "summary": "Full frontend verification of the new Environment Setup Wizard (P1) in demo mode. All 12 requested behaviours verified: wizard opens from both WindowChrome and Settings, overall status pill reads 'CLI offline', CLI card shows 'NOT FOUND', mtkclient/heimdall show 'UNKNOWN', offline hint visible, OS switcher swaps commands correctly for Windows/macOS/Linux, copy buttons don't throw, Download CLI link present with correct GitHub releases URL, Re-check button is disabled, Done/Close closes the modal. Regression across all 9 nav routes clean and Samsung connect flow still streams a Galaxy device. Only a minor Radix a11y console warning (missing DialogTitle) was surfaced.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "SetupWizard modal", "issues": ["Radix DialogContent is missing a DialogTitle and Description, producing an accessibility console error/warning on every open. Wrap the h2 'Environment Setup Wizard' in <DialogTitle> (or VisuallyHidden) and add a <DialogDescription> to silence and improve screen-reader support."]}
+    ]
+  },
+  "test_report_links": [],
+  "action_items": [
+    "(Optional/low-priority) Add <DialogTitle> and <DialogDescription> (or VisuallyHidden wrappers) inside SetupWizard's <DialogContent> to satisfy Radix a11y and remove console noise. Same fix could be applied to any other Dialog-based modals that log the same warning."
+  ],
+  "critical_code_review_comments": [
+    "SetupWizard.jsx is well-scoped (~370 lines) and correctly gates depState()/autoInstall/recheck on `connected`, keeping demo mode side-effect-free.",
+    "Auto-open effect is properly guarded via localStorage + `connected && bridge.info`, so the wizard won't spontaneously appear in the web demo.",
+    "Minor: the same DialogContent a11y omission (no DialogTitle/Description) will trigger a Radix runtime error in dev builds — consider wrapping it once and reusing."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "n/a (frontend-only run)", "frontend": "100%"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 (from /app/memory/test_credentials.md — worked first try).",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "should_main_agent_self_test": true,
+  "context_for_next_testing_agent": "Setup Wizard (P1) is fully verified in demo mode. Live-mode features (Re-check enabled, setup-autoinstall-mtkclient button, version pills) cannot be exercised in the container because the local CLI ws://127.0.0.1:8765 is intentionally unreachable — do not attempt to start it. If you need to verify those, mock cliBridge.status='connected' with a stubbed info={mtkclient:'2.0.0', heimdall:'v1.4.2', python:'3.11'} inside AppContext for a scoped run. All 9 nav routes render; Samsung connect regression is clean. Only outstanding item is the Radix DialogTitle a11y warning (already documented above).",
+  "rca of the issue": "N/A — no functional issues found. The console warnings are caused by Radix Dialog v1 requiring an accessible name (DialogTitle) and description (DialogDescription); the SetupWizard renders a plain <h2> instead. Reproduction: open the wizard → observe console. Mitigation: import { DialogTitle, DialogDescription } from './ui/dialog' and use them (optionally wrapped in @radix-ui/react-visually-hidden if the current visual design must be preserved)."
+}

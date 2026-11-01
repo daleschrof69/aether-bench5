@@ -1,0 +1,37 @@
+[package]
+name = "aether-desktop"
+version = "0.1.0"
+description = "Aether Repair Tool — native desktop wrapper."
+authors = ["Aether Labs <hello@aether.dev>"]
+license = "Proprietary"
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "aether_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+tauri-plugin-shell = "2"
+tauri-plugin-process = "2"
+tauri-plugin-dialog = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+anyhow = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+# When you're ready to bundle the real CLI exploits directly into the desktop
+# build (no separate `aether-cli serve` process), uncomment this and update the
+# IPC commands in src/lib.rs to call into it.
+# aether-cli = { path = "../../aether-cli" }
+
+[profile.release]
+opt-level = "s"   # optimise for size — keeps the .exe small
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"

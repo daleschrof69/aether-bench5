@@ -1,0 +1,103 @@
+{
+  "summary": "Frontend-only regression suite after Path A integration (mtkclient subprocess wrapper + WebSocket bridge + useCliBridge.runJob() + AppContext live-mode preference). All 10 regression/verification items PASS. Web app did NOT regress — demo mode still works end-to-end, no spurious WebSocket attempts in default mode, and bridge-enabled mode degrades gracefully with reconnect throttled to 5s.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "REG1_admin_login_and_dashboard": {
+      "login_lands_on_dashboard": true,
+      "landed_url": "https://mtk-qualcomm-tool.preview.emergentagent.com/",
+      "visible_panels_in_screenshot": ["Demo Mode banner", "Get Aether for Windows hero", "Founding Builder banner ($299 lifetime)", "Connection / Active Operation / Successful Ops / Exploit DB stat tiles (4)", "Device Status (Ready to scan)", "Device Information", "Cloud Exploit Database", "Quick Actions (4 buttons)", "Console pane"],
+      "note": "Some panels don't expose data-testid (device-status, device-info, quick-actions, console, get-aether-hero) — flagged as minor enhancement. Confirmed visible in screenshots."
+    },
+    "REG2_sidebar_routes": {
+      "all_8_routes_navigate": true,
+      "routes": {"nav-dashboard":"/","nav-mtk":"/mtk","nav-qualcomm":"/qualcomm","nav-iphone":"/iphone","nav-logs":"/logs","nav-docs":"/docs","nav-pricing":"/pricing","nav-settings":"/settings"},
+      "body_content_length_min": 617,
+      "no_blank_screens": true
+    },
+    "REG3_mobile_drawer_375px": {
+      "hamburger_visible": true,
+      "drawer_opens_on_click": true,
+      "all_8_nav_links_visible_in_drawer": "confirmed via screenshot",
+      "note": "[data-testid='sidebar'] not present on Sidebar root — bounding_box test failed but drawer behaviour visually verified."
+    },
+    "REG4_demo_banner_autohide": {
+      "banner_visible_when_cli_offline": true,
+      "autohide_logic_in_DemoModeBanner": "cliStatus === 'connected' → returns null (line 23)"
+    },
+    "REG5_demo_mode_operation_bypass_frp": {
+      "device_connects_via_start_scan": true,
+      "device_model_detected": "SM8550 / SM8635 (varies)",
+      "bypass_frp_clickable_when_connected": true,
+      "running_badge_appears": true,
+      "console_logs_executing_demo": true,
+      "console_logs_executing_live": false,
+      "returns_to_connected_after_completion": true,
+      "no_bridge_errors_during_demo_action": true,
+      "progress_indicator_updates": "13% observed in screenshot, increments over time"
+    },
+    "REG6_download_popovers": {
+      "desktop-download-trigger": "OK — 2 github.com/braidenbarker/aether/releases/latest/download/ URLs (Aether_0.1.0_universal.dmg, aether-desktop_0.1.0_amd64.AppImage)",
+      "cli-download-trigger": "OK — same URLs surfaced",
+      "hero_card_download_button": "DOWNLOAD .MSI (WINDOWS) button + .DMG/.APPIMAGE links visible in dashboard hero (screenshot)"
+    },
+    "REG7_status_bar_cli_indicator": {
+      "data_testid_present": "cli-bridge-status",
+      "default_text": "CLI · disabled (demo)",
+      "after_bridge_enabled_no_cli_running": "CLI · offline"
+    },
+    "REG8_no_errors_in_default_mode": {
+      "localStorage_bridge_enabled_default": null,
+      "websocket_attempts_to_127_0_0_1_8765": 0,
+      "bridge_related_console_errors": 0,
+      "wss_to_emergent_ws_present": "that is the React/HMR/bundler socket — NOT from useCliBridge",
+      "verdict": "PASS — useCliBridge correctly skips connect() when enabled !== '1'"
+    },
+    "REG9_settings_page": {
+      "autoconnect_toggle_text_present": true,
+      "sound_toggle_text_present": true,
+      "start_search_button_text_present": true,
+      "disconnect_text_in_settings": false,
+      "note": "Disconnect button appears on Dashboard device-card (visible when connected) rather than Settings — verified in screenshot. Not a regression."
+    },
+    "V10_bridge_enabled_offline_behavior": {
+      "after_setting_localStorage_aether_bridge_enabled_1_and_reload": true,
+      "cli_status_text": "CLI · offline",
+      "websocket_attempts_to_127_0_0_1_8765": "yes — multiple (reconnecting)",
+      "console_errors_initial_6s": 9,
+      "console_errors_next_8s": 6,
+      "error_text": "WebSocket connection to 'ws://127.0.0.1:8765/' failed: net::ERR_CONNECTION_REFUSED — these are Chromium-emitted errors from the failed WS, NOT JS thrown errors. Expected behavior.",
+      "no_error_flood": "yes — reconnect throttled to 5s interval as designed",
+      "dashboard_remains_usable": true,
+      "demo_action_still_runs_during_offline_reconnects": true,
+      "no_spinner_lock_no_crash": true,
+      "page_errors": 0
+    }
+  },
+  "test_report_links": ["/app/test_reports/iteration_5.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "useCliBridge.js correctly gates the WebSocket creation behind `localStorage.getItem('aether.bridge.enabled') === '1'` (line 39). No connect attempt made in default mode — verified 0 WS attempts to 127.0.0.1:8765 in 6s observation window. ✓",
+    "AppContext.runAction correctly prefers cliBridge.runJob() ONLY when `cliBridge.status === 'connected'` (line 100). When offline, falls back to ACTION_LOG_TEMPLATES demo. Verified console pane logs '>>> EXECUTING (DEMO):' not 'LIVE'. ✓",
+    "BRIDGE_METHODS map (lines 12-18) covers bypass_frp, unlock_bootloader, erase_userdata, read_info — repair_imei intentionally omitted pending a future input modal. Sensible. ✓",
+    "On WS close, useCliBridge correctly rejects all pendingRef promises and resolves all jobSubsRef with exit_code: -1 so React components don't hang (lines 102-108). ✓",
+    "Reconnect setTimeout is 5000ms (line 109) — confirmed no error flood observed across 14s, ~3 attempts max in default test window. ✓",
+    "DemoModeBanner auto-hides on `cliStatus === 'connected'` (line 23). ✓",
+    "StatusBar cli-bridge-status has three states: disabled/offline/connecting/connected with appropriate text + colour dot. ✓",
+    "ENHANCEMENT (non-blocking): Several dashboard top-level panels lack `data-testid` (device-status, device-info, quick-actions, console pane, get-aether-hero card, stat-tiles). Adding these would make automated regression tests less screenshot-dependent.",
+    "ENHANCEMENT (non-blocking): The `repair_imei` BRIDGE_METHODS entry is commented out (line 17). When that modal lands, also wire it into BRIDGE_METHODS so live mode works for IMEI repair.",
+    "ENHANCEMENT (non-blocking): The Chromium-level 'WebSocket failed: ERR_CONNECTION_REFUSED' message cannot be suppressed from JS — consider mentioning this in docs so users in bridge-enabled mode don't think the app is broken. (Status bar already says 'CLI · offline', which is the user-facing signal.)"
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not retested (frontend-only request)", "frontend": "100% — all 10 regression/verification items PASS"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 — working.",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Path A integration (mtkclient subprocess + WebSocket bridge + useCliBridge.runJob + AppContext.runAction live-mode) verified non-regressive on the web app. Demo mode end-to-end fully functional. Bridge-enabled mode (localStorage.aether.bridge.enabled='1') gracefully degrades to CLI · offline with 5s reconnect throttle and no JS errors. The only console output in offline-reconnect mode is the unavoidable Chromium-level 'WebSocket failed: ERR_CONNECTION_REFUSED' which is expected behaviour. No code changes required. If you continue testing, focus areas would be: (1) IMEI repair modal when implemented, (2) actual mtkclient subprocess invocation (requires Python+mtkclient+phone — out of scope for web testing), (3) adding data-testid to top-level dashboard panels for easier future automation.",
+  "rca_of_the_issue": "Not applicable — no bugs found."
+}

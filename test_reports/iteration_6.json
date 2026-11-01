@@ -1,0 +1,114 @@
+{
+  "summary": "Frontend-only verification of Samsung Service demo-mode fix. All 12 requested checks PASS. New Samsung demo path (mock cycler produces Samsung devices, Samsung-Connect button forces SAMSUNG pool, samsung_detect/samsung_read_pit/samsung_factory_reset demo templates stream to Console) works end-to-end. No regressions on other routes or Dashboard auto-connect. No new console/JS errors, no spurious WS attempts to 127.0.0.1:8765 in default (bridge-disabled) mode.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "REG1_admin_login": {"login_success": true, "landed_on": "/", "content_len": 279402},
+    "REG2_sidebar_all_9_routes": {
+      "nav-dashboard": "OK /",
+      "nav-mtk": "OK /mtk",
+      "nav-qualcomm": "OK /qualcomm",
+      "nav-samsung": "OK /samsung",
+      "nav-iphone": "OK /iphone",
+      "nav-logs": "OK /logs",
+      "nav-docs": "OK /docs",
+      "nav-pricing": "OK /pricing",
+      "nav-settings": "OK /settings",
+      "no_blank_screens": true
+    },
+    "REG3_samsung_page_structure": {
+      "samsung-page": true,
+      "samsung-knox-warning": true,
+      "action-grid-panel": true,
+      "action-samsung-detect": true,
+      "action-samsung-pit": true,
+      "action-samsung-reset": true,
+      "action-samsung-frp": true,
+      "header": "Samsung Service Module",
+      "known_good_chip_cloud_visible": true,
+      "knox_limited_chip_cloud_visible": true,
+      "console_visible": true
+    },
+    "REG4_connect_button_visibility": {
+      "samsung-connect-btn_visible_when_not_samsung": true,
+      "note": "Auto-connected device on dashboard was non-Samsung on this run; connect button correctly visible on /samsung."
+    },
+    "REG5_connect_samsung_flow": {
+      "click_scans_and_connects_samsung": true,
+      "device_platform_after_connect": "Samsung (verified from screenshot Device Info Panel)",
+      "device_model_after_connect": "Galaxy S9 (SM-G960F)",
+      "brand": "Samsung Galaxy S9",
+      "bootloader": "Download Mode (Odin/Loke)",
+      "connect_button_hidden_after_connect": true,
+      "known_good_S9_chip_highlighted_green": true
+    },
+    "REG6_action_buttons_enabled_after_connect": {
+      "action-samsung-detect_disabled": null,
+      "action-samsung-pit_disabled": null,
+      "action-samsung-reset_disabled": null,
+      "action-samsung-frp_disabled": null,
+      "verdict": "All 4 Samsung action buttons ENABLED (previously all permanently disabled — fix confirmed)."
+    },
+    "REG7_samsung_detect_streams_console": {
+      "console_shows_EXECUTING_DEMO_Detect_Device": true,
+      "console_shows_Samsung_device_detected_in_Download_Mode": true,
+      "no_EXECUTING_LIVE_prefix": true,
+      "returns_to_connected_after_completion": true
+    },
+    "REG8_samsung_read_pit_streams_console": {
+      "console_shows_EXECUTING_DEMO_Read_PIT_Table": true,
+      "console_shows_PIT_table_dumped": true
+    },
+    "REG9_samsung_factory_reset_streams_console": {
+      "console_shows_EXECUTING_DEMO_Factory_Reset": true,
+      "console_shows_Erasing_USERDATA_partition": true,
+      "console_shows_Factory_reset_complete": true
+    },
+    "REG10_all_other_routes_render_no_blank": {
+      "dashboard": "OK body_len=4510",
+      "mtk": "OK h1='MTK Service Module'",
+      "qualcomm": "OK h1='Qualcomm Service Module'",
+      "iphone": "OK h1='iPhone Service Module'",
+      "logs": "OK h1='Session Logs'",
+      "docs": "OK h1='Aether Academy'",
+      "pricing": "OK h1='Pricing & Credits'",
+      "settings": "OK h1='Settings'"
+    },
+    "REG11_dashboard_auto_connect_and_scan": {
+      "auto_connect_worked_on_boot": true,
+      "btn-start-scan_present_when_connected": false,
+      "note": "btn-start-scan hidden when device already connected (expected behavior). Auto-connect verified via console/status-bar 'CONNECTED · DEVICE: GALAXY' after navigating back to Dashboard. Samsung device also renders fine on Dashboard (Quick Actions use platform=ALL)."
+    },
+    "REG12_no_new_console_or_ws_errors": {
+      "total_console_errors": 2,
+      "error_types": "2x 'Failed to load resource: status 401' — unrelated to Samsung feature (likely auth/me heartbeat before login completes). No JS thrown errors, no WS errors.",
+      "websocket_attempts_to_127_0_0_1_8765": 0,
+      "verdict": "PASS — no new errors introduced by Samsung demo fix"
+    }
+  },
+  "test_report_links": ["/app/test_reports/iteration_6.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "mockData.js pickPool() correctly handles both explicit chipset key ('SAMSUNG') AND accidental event-object passthrough — guards against onClick={startSearch} bugs. ✓",
+    "SamsungService.jsx `matches = device.platform === 'Samsung'` (line 26) — correctly aligned with generateDevice() which sets platform='Samsung'. Previous bug (device.brand === 'Samsung') would never match since brand strings are 'Samsung Galaxy S9' etc. Fix verified. ✓",
+    "ActionGrid platformOk gate (line 50): `!device || device.platform === platform || platform === 'ALL'`. For Samsung tab, buttons enable only when platform === 'Samsung'. Confirmed working. ✓",
+    "ACTION_LOG_TEMPLATES now includes samsung_detect / samsung_read_pit / samsung_factory_reset. All three stream expected log lines. samsung-frp reuses existing `bypass_frp` template (line 169 of ActionGrid.jsx sets key='bypass_frp' for the Samsung FRP button) — reasonable. ✓",
+    "AppContext.startSearch coerces non-string arg to 'auto' (line 63) — protects against onClick event object being passed accidentally. ✓",
+    "BRIDGE_METHODS includes samsung.* entries (lines 17-19) so live-mode path is wired; PATH B (demo) correctly used when bridge status !== 'connected'. ✓",
+    "Weighted pool pick in pickPool: 40% MTK / 35% QC / 25% Samsung — reasonable mix for auto scans (comment says '~1 in 4 auto scans'). ✓",
+    "Known-good chip cloud correctly highlights 'Galaxy S9' when connected Samsung model contains that substring — verified in screenshot (green border). ✓",
+    "ENHANCEMENT (non-blocking): Console pane and DeviceInfoPanel could benefit from `data-testid='console'` and `data-testid='device-info-panel'` root testids to make automated regex-based DOM scraping unnecessary (regex against innerText missed 'Platform' row due to whitespace)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not tested (frontend-only request)", "frontend": "100% — all 12 verification items PASS"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 — working.",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Samsung Service demo-mode fix fully verified. mockData.js now has SAMSUNG_DEVICES pool + POOLS map + pickPool() with weighted auto pick (40% MTK / 35% QC / 25% Samsung). SamsungService.jsx uses device.platform === 'Samsung' (was device.brand which never matched). ActionGrid platformOk logic correctly enables Samsung actions when platform matches. 3 new demo templates (samsung_detect, samsung_read_pit, samsung_factory_reset) stream expected log lines. No regressions on other routes. Bridge behavior unchanged from iteration_5. If future testing is needed, focus areas: (1) verify Samsung device also appears via Dashboard auto-scan cycler over multiple reloads (statistical — ~1 in 4), (2) verify Bypass FRP on Samsung tab still uses shared bypass_frp template (reasonable design), (3) if IMEI repair modal lands, wire into BRIDGE_METHODS.",
+  "rca_of_the_issue": "Not applicable — verification pass, no bugs found."
+}

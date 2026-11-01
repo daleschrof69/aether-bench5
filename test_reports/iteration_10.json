@@ -1,0 +1,42 @@
+{
+  "summary": "Iteration 10 (frontend-only) — Verified Drivers Download Center, cable-free Enter EDL demo action on Qualcomm page, expanded phone catalog, WebUSB regression and all 10 nav routes. Everything passed. Login (admin@aether.dev / aether_admin_2026) succeeded and dashboard rendered. DRIVERS PAGE: /drivers renders drivers-page; 16 total driver cards (spec said ~17 — DRIVERS array in /app/frontend/src/lib/drivers.js has exactly 16 entries: 3 Chipset + 9 OEM USB + 4 Tools; if 17 was intended, one entry is missing). Platform-tools card has all 3 per-OS download buttons (windows/macos/linux) with proper https hrefs to dl.google.com and target=_blank. All 18 download anchors (16 cards, +2 extra OS buttons for platform-tools counted from 3 per-OS anchors replacing single card anchor) have https + target=_blank. Google USB → dl.google.com verified; Samsung → developer.samsung.com verified. Search 'qualcomm' filters to 2 cards (qualcomm-9008 + oppo-realme mentions Qualcomm in desc). Search 'zzzznonsense' shows drivers-empty. Category chips work: Tools → exactly {platform-tools, zadig, libusb, apple-devices}; Chipset → 3 cards; OEM USB → 9 cards; All → restores 16. EDL: edl-no-cable-note strip present with 'adb reboot edl', 'fastboot oem edl', and test-point (ISP) copy. Enter EDL (no cable) is the FIRST button in the Qualcomm action grid (action button order: enter-edl → bypass-frp → repair-imei → unlock-bootloader → erase-userdata → knox-suspend → carrier-unlock → demo-disable → safe-format). After reconnecting until a Qualcomm device appeared (SM8150 Snapdragon 855), clicking action-enter-edl streamed demo log lines: 'Device acknowledged — rebooting to Emergency Download ...', 'Re-enumerating USB → 05c6:9008 Qualcomm HS-USB QDLoader 9008', 'EDL 9008 active. Sahara handshake ready — no EDL cable used.' — spec keywords ALL present. EXPANDED CATALOG: 12 demo scans yielded 11 unique models across all 3 platforms {MediaTek, Qualcomm, Samsung} — e.g. MT6893 (Dimensity 1200), MT6763 (Helio P23), MT6771, MT6853, MT6897 (Dimensity 8300), MT6877, MT6886 (Dimensity 7200 Pro), SM8150, SM8450 (Snapdragon 8 Gen 1), Galaxy A10 (SM-A105F), Galaxy Tab A (SM-T510). All connected cleanly with populated Device Information (brand, IMEI, serial, storage, RAM, Android, bootloader, region). No crashes. WEBUSB: btn-webusb-connect present in disconnected DeviceStatus state, clickable, no crash on click. NAV REGRESSION: all 10 nav routes (Dashboard, MTK, Qualcomm, iPhone, Samsung, Drivers, Logs, Docs, Pricing, Settings) render without blank screens. No page errors, no console errors captured.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "observations": [
+    {
+      "area": "Drivers count",
+      "issue": "Spec text says 'expect ~17 cards' but /app/frontend/src/lib/drivers.js has exactly 16 entries (3 Chipset + 9 OEM USB + 4 Tools). Not a bug — the '~' makes it approximate — but if an extra driver was intended (e.g. Nokia HMD driver or a MediaTek Auth Bypass tool), it is missing. Otherwise close the loop by tightening the spec to '16'."
+    },
+    {
+      "area": "Qualcomm device connect probability",
+      "issue": "Demo scanner had to be retried ~7 times before a Qualcomm device (SM8150) appeared — pool is heavily weighted toward MediaTek. Acceptable per spec ('It's acceptable if you must retry the demo scan to get a Qualcomm device'), just flagging that a technician running only the Qualcomm module might feel the wait. Consider a small heuristic that favors the platform matching the current page, or a manual chipset picker in the demo scanner."
+    }
+  ],
+  "test_report_links": [
+    "/app/test_reports/drivers_page.png",
+    "/app/test_reports/qualcomm_edl_run.png"
+  ],
+  "action_items": [
+    "OPTIONAL: Add one more driver entry if 17 was the intended count, or update spec/docs to 16.",
+    "OPTIONAL: Bias demo scanner toward the currently-open service module's platform (or add manual platform picker) to make Qualcomm-only workflows less repeat-scan-heavy."
+  ],
+  "critical_code_review_comments": [
+    "drivers.js is a clean data-only module (~160 lines) — good separation. Every entry has a category, platforms[], source, url|urls and desc. `urls` (per-OS map) is only used by platform-tools which is exactly what the UI expects; DriverCard renders per-OS buttons via Object.entries(d.urls) with data-testid=`driver-download-${id}-${os.toLowerCase()}`.",
+    "Drivers.jsx (~180 lines): search + category filter memoized correctly (useMemo on [query, cat]); scrolls with h-full overflow-y-auto p-4 as spec calls out; empty state handled with data-testid='drivers-empty'. All external links use rel='noreferrer' + target='_blank' which is correct.",
+    "ActionGrid.jsx QC_ACTIONS puts enter_edl first as required. handleAction correctly short-circuits repair_imei to the modal but forwards enter_edl to runAction. Consider explicitly guarding enter_edl to only enable when device.platform==='Qualcomm' — currently relies on the page passing platform='Qualcomm' which already gates the whole grid via platformOk.",
+    "QualcommService.jsx: edl-no-cable-note info strip is a small, well-worded blue-tinted callout — visually distinct from the yellow 'wrong platform' warning and the green action buttons. Copy references adb / fastboot / test-point correctly. No a11y label but not critical.",
+    "AppContext BRIDGE_METHODS.enter_edl → qualcomm.enter_edl is wired; the demo log template ACTION_LOG_TEMPLATES.enter_edl produces the exact spec lines (verified via runtime playback).",
+    "No console/JS errors during any of the flows. No React key warnings. No 500s. /api/auth/me expected 401 before login (pre-login), then 200 after login (per prior iterations)."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only test)", "frontend": "100% (all spec items PASSED)"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Used seeded admin.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Drivers page uses data-testid pattern driver-card-<id> and driver-download-<id> (or driver-download-<id>-<os> for platform-tools). Filter chip testids are drivers-filter-all / drivers-filter-chipset / drivers-filter-oem-usb / drivers-filter-tools (Category names lowercased with hyphens). Search input: drivers-search; empty state: drivers-empty. Login button label is 'SIGN IN →' — use button:has-text('SIGN IN') not exact-match. Enter EDL demo action requires status==='connected' AND device.platform==='Qualcomm' — the demo scanner is weighted MediaTek-heavy so expect ~5-8 reconnects (disconnect + start-scan) to hit a QC device. Once QC connects, action-enter-edl streams the demo log with 'EDL 9008 active ... no EDL cable used' within ~3-5s. Expanded catalog scan produces 11+ unique models across MediaTek/Qualcomm/Samsung. WebUSB button data-testid='btn-webusb-connect' only renders in DeviceStatus when status !== 'connected' — disconnect first if you need to test it."
+}

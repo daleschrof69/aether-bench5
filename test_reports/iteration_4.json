@@ -1,0 +1,70 @@
+{
+  "summary": "Re-tested the Sidebar mobile-drawer fix from iteration_3. All 4 viewport behaviours (375 / 768 / 1024 / 1920) PASS, all 4 regression checks PASS. FIX 1 is now SHIPPING-READY. No new console errors, no page errors during route navigation.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_results": {
+    "viewport_375px": {
+      "sidebar_default_offscreen": true,
+      "sidebar_bbox_closed": {"x": -240, "width": 240},
+      "hamburger_visible": true,
+      "hamburger_testid": "sidebar-mobile-toggle",
+      "click_hamburger_opens_drawer": true,
+      "drawer_open_bbox": {"x": 0, "width": 240},
+      "backdrop_visible_when_open": true,
+      "close_via_X_button": true,
+      "close_via_backdrop_click": true,
+      "hero_card_width_px": 343,
+      "hero_title_text": "Get Aether for Windows",
+      "hero_title_single_line_height_px": 20,
+      "hero_title_no_letter_wrap": true,
+      "nav_link_click_closes_drawer_and_navigates": true
+    },
+    "viewport_768px": {
+      "sidebar_default_offscreen": true,
+      "hamburger_visible": true,
+      "drawer_opens_with_backdrop": true,
+      "close_via_X": true,
+      "close_via_backdrop_click": true
+    },
+    "viewport_1024px": {
+      "sidebar_visible_inline": true,
+      "hamburger_hidden": true,
+      "backdrop_absent": true
+    },
+    "viewport_1920px": {
+      "sidebar_visible_inline": true,
+      "hamburger_hidden": true,
+      "hero_card_rendered": true
+    },
+    "regression": {
+      "admin_login_lands_on_dashboard": true,
+      "all_8_sidebar_routes_navigate": true,
+      "routes_tested": ["/", "/mtk", "/qualcomm", "/iphone", "/logs", "/docs", "/pricing", "/settings"],
+      "console_pageerrors_during_navigation": 0,
+      "preexisting_401_on_/api/auth/me_before_login": "pre-existing noise from iteration_2, not introduced by this fix"
+    }
+  },
+  "test_report_links": ["/app/test_reports/iteration_4.json"],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Sidebar.jsx correctly uses `-translate-x-full lg:translate-x-0` so the drawer is hidden by default below lg and stays inline at lg+. ✓",
+    "Hamburger (`sidebar-mobile-toggle`) is `lg:hidden fixed top-12 left-2 z-30` — doesn't collide with the WindowChrome bar. ✓",
+    "Backdrop is z-40, sidebar is z-50 — backdrop click outside the 240px sidebar correctly closes the drawer. ✓",
+    "useEffect on `location.pathname` correctly auto-closes the drawer on route change. Verified by clicking nav-mtk at 375px (sidebar went from x=0 to x=-240 after URL changed to /mtk). ✓",
+    "useLocation imported correctly from react-router-dom (line 2). No 'useLocation is not defined' or cleanup warnings during route hops. ✓",
+    "Minor (non-blocking): The mobile drawer is `fixed inset-y-0 left-0` but the parent layout still reserves a 240px slot at lg+ because of `w-60 flex-shrink-0` outside the lg:relative. This is intentional and works — leaving as-is.",
+    "Hero card title 'GET AETHER FOR WINDOWS' (uppercase via CSS, raw text 'Get Aether for Windows') renders on ONE 20px-tall line at 375px width=343 — letter-by-letter wrap bug from iter_3 is gone."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "not retested (frontend-only request)", "frontend": "100% — 4/4 viewports PASS, 4/4 regressions PASS"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 confirmed working.",
+  "seed_data_creation": "None.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "Sidebar drawer fix verified at 375/768/1024/1920 with all sub-behaviours (off-screen default, hamburger toggle, backdrop, X close, backdrop close, auto-close-on-route-change, hero title single-line at 375). All P0/P2 fixes from iterations 1-3 are shipping-ready. Task can be considered complete.",
+  "rca_of_the_issue": "Not applicable — fix is verified."
+}

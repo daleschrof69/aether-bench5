@@ -1,0 +1,38 @@
+{
+  "summary": "Iteration 11 — Frontend regression pass after code-review refactors (DeviceStatus lookup-table, ActionGrid.ActionButton, BuyCreditsModal PlanCard/PackCard, CloudExploitDB CVEEntry + useMemo, ProtectedRoute useMemo, useCliBridge runJob rewrite, error logging in hero/banner/wizard catch blocks). ALL SPEC ITEMS PASS. (1) Login admin@aether.dev / aether_admin_2026 succeeds and redirects to /. (2) Dashboard renders device-status-panel, action-grid-panel, cloud-exploit-db. (3) Auto-connect did NOT fire within 15s (same latency observation as iteration 8 — AuthContext /api/auth/me delays AppShell mount). Manual btn-start-scan click connected MT6885 (Dimensity 1000+) in ~3s. (4) btn-disconnect returned panel to idle state with btn-start-scan + btn-webusb-connect visible, then reconnected via start-scan in ~3s. (5) action-bypass-frp enabled+clickable, showed 'RUNNING' badge, streamed console log. (6) action-repair-imei correctly opens IMEI modal instead of firing action. (7) CloudExploitDB: All=11 entries, Active filter→4, Fixed→2, Refresh works, All restored to 11 — counts and testids (cve-entry, cve-filter-active/fixed/all, cve-refresh) all correct. (8) BuyCreditsModal opened via BUY CREDITS button — all 7 required testids present: buy-plan-solo_annual, buy-plan-founding_lifetime, buy-pack-credits_starter, buy-pack-credits_builder, buy-pack-credits_workshop, buy-pack-credits_wholesale, buy-credits-close. Close button dismisses modal correctly. (9) GetDesktopHeroCard dismiss (get-desktop-hero-dismiss) + DemoModeBanner dismiss (demo-banner-dismiss) both click cleanly with no thrown errors. (10) Sidebar navigation to /mtk, /qualcomm, /iphone, /samsung, /drivers, /docs — all render, no blank pages, no errors, no error boundaries. (11) ProtectedRoute redirect: cleared cookies + visited / → correctly redirected to /login (expected 401 on /api/auth/me is visible in console, redirect logic via useMemo redirectState works). Zero runtime JS errors during entire regression. All refactored components render and function identically to pre-refactor behavior.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "observations": [
+    {
+      "area": "Post-login auto-connect delay (recurring across iterations 8, 11)",
+      "issue": "Dashboard auto-connect boot sequence still does not complete within 15s of landing on /. This is unchanged behavior — AuthContext /api/auth/me verification + AppProvider mount push wall-clock past the boot chain's naive expectation. Repro: fresh login → land on / → wait 15s → status remains 'idle', Repair IMEI/Bypass FRP buttons disabled → clicking btn-start-scan connects in ~3s. NOT a regression from this iteration's refactors (same behavior in iteration 8). If the spec 'auto-connect kicks in ... within a few seconds' is a hard requirement, the boot useEffect in AppContext should be gated on AuthContext.loading === false, or auto-connect should be moved into a post-auth effect."
+    }
+  ],
+  "test_report_links": [
+    "/app/test_reports/dashboard_connected.png"
+  ],
+  "action_items": [
+    "OPTIONAL (recurring): Investigate auto-connect not firing within ~15s of post-login redirect. Consider gating AppContext boot useEffect on AuthContext user resolution, or move device auto-detect into a post-auth-verify effect. Users currently have to click START SCAN manually — acceptable in demo, less ideal for stated auto-connect UX."
+  ],
+  "critical_code_review_comments": [
+    "DeviceStatus.jsx (198 lines): HEADER_STATES lookup table cleanly replaces nested ternaries. Sub-components (IdlePanel, SearchingPanel, ConnectedPanel, DisconnectedActions, WorkingProgress, StatusBody) are all single-responsibility and prop-drilled cleanly. StatusBody early-returns null when status is unknown — good defensive fallback.",
+    "ActionGrid.jsx (187 lines): ActionButton extraction is clean — action prop + isActive/isDisabled/onClick keeps the component pure. handleAction correctly short-circuits repair_imei to setImeiModalOpen(true) without calling runAction (verified: modal opens, action does not fire). ICONS lookup is a Records-style map — good.",
+    "BuyCreditsModal.jsx (196 lines): PlanCard/PackCard extraction preserves featured styling (founding_lifetime green highlight, credits_builder popular badge) and busy/disabled states via props. All 7 testids intact and functional.",
+    "CloudExploitDB.jsx (213 lines): CVEEntry extraction is clean, and useMemo on `visible`/`counts` correctly memoizes on [feed, filter] and [feed]. The 9s setInterval for buildRandomEntry still works and marks new entries with .fresh flag.",
+    "ProtectedRoute.jsx (26 lines): useMemo(() => ({ from: location }), [location]) is correct — prevents Navigate from receiving a new state object every render. Redirect verified working.",
+    "useCliBridge.js (169 lines): runJob no-async-promise-executor removal is correct — the async IIFE inside the Promise executor is a valid pattern that keeps the outer promise sync while still awaiting `call()`. onEvent callback wrapped in try/catch with console.error — defensive against user callback throws. Reject-on-close of pending RPCs + job subs is a solid cleanup.",
+    "No console errors during regression (only expected 401 on /api/auth/me pre-login). No React key warnings, no dev warnings from Radix or lucide-react.",
+    "OBSERVATION (non-blocking): DeviceStatus.jsx StatusBody returns null for status values outside {idle, searching, connected, working}. If new statuses are added in future, the panel body will be empty — consider a default fallback panel. Minor."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only test per request)", "frontend": "100% (all 9 spec items PASSED)"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Used seeded admin only.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All refactored components tested with correct testids. Buy Credits trigger button uses text match 'BUY CREDITS' (no dedicated testid on the sidebar button — main agent may want to add data-testid='btn-buy-credits' on it, but the modal itself has data-testid='buy-credits-modal' and all 7 required testids inside). Hero/banner dismiss testids are get-desktop-hero-dismiss and demo-banner-dismiss. Auto-connect delay after login is a known/recurring observation from iteration 8 — clicking btn-start-scan bypasses it. For any test needing connected state, either wait 20+ seconds OR click [data-testid='btn-start-scan']."
+}

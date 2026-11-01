@@ -1,0 +1,20 @@
+{
+  "name": "aether-desktop",
+  "version": "0.1.0",
+  "description": "Aether Repair Tool — native Windows / macOS / Linux desktop wrapper.",
+  "private": true,
+  "scripts": {
+    "dev": "tauri dev",
+    "build": "tauri build",
+    "build:msi": "tauri build --bundles msi",
+    "build:nsis": "tauri build --bundles nsis",
+    "build:dmg": "tauri build --bundles dmg",
+    "build:appimage": "tauri build --bundles appimage"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

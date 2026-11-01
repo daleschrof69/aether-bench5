@@ -1,0 +1,117 @@
+name: Release aether-desktop
+
+on:
+  push:
+    tags:
+      - "desktop-v*"
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build · ${{ matrix.platform }}
+    permissions:
+      contents: write
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # macOS — universal binary covers both Intel + Apple Silicon
+          - platform: macos-latest
+            args: "--target universal-apple-darwin"
+            bundle: dmg
+          # Linux — ubuntu-22.04 is required for libwebkit2gtk-4.1 (24.04 ships 4.0)
+          - platform: ubuntu-22.04
+            args: ""
+            bundle: appimage
+          # Windows — x64 only (arm64 needs extra MSVC components, fragile in CI)
+          - platform: windows-latest
+            args: ""
+            bundle: msi
+
+    runs-on: ${{ matrix.platform }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      # Install webkit + GTK on Linux BEFORE the Rust toolchain so build scripts
+      # that link against system libraries during cargo check don't blow up.
+      - name: Linux system deps
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libgtk-3-dev \
+            libsoup-3.0-dev \
+            build-essential \
+            curl \
+            wget \
+            file
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          # Universal Apple target needs both arches available.
+          targets: ${{ matrix.platform == 'macos-latest' && 'x86_64-apple-darwin,aarch64-apple-darwin' || '' }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "aether-desktop/src-tauri -> target"
+          key: ${{ matrix.platform }}
+
+      - name: Install frontend dependencies
+        run: yarn install
+        working-directory: aether-desktop
+
+      # Official Tauri action — handles `tauri build`, icon detection,
+      # bundle generation, artefact upload, and draft release creation.
+      - name: Build & release
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # ── macOS code-signing + notarization (OPTIONAL) ──────────────────
+          # Leave these repo secrets unset to produce an *unsigned* build (users
+          # will see a Gatekeeper warning). Set them to sign + notarize so the
+          # .dmg opens cleanly. See /SIGNING.md for how to obtain each value.
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          # ── Windows Authenticode (OPTIONAL) ───────────────────────────────
+          # Requires configuring bundle.windows.certificateThumbprint in
+          # tauri.conf.json (or Azure Trusted Signing). See /SIGNING.md.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          projectPath: aether-desktop
+          tagName: ${{ github.ref_name }}
+          releaseName: "Aether Repair Tool ${{ github.ref_name }}"
+          releaseBody: |
+            ## Aether Repair Tool · ${{ github.ref_name }}
+
+            Native desktop builds — drop-in replacement for the web preview.
+
+            **Downloads**
+            - 🪟 `.msi` — Windows x64
+            - 🍎 `.dmg` — macOS (universal: Intel + Apple Silicon)
+            - 🐧 `.AppImage` — Linux x64
+
+            Skips Demo Mode — talks to MTK BROM, Qualcomm Sahara/Firehose,
+            Apple DFU, Samsung KG directly over USB via the bundled CLI bridge.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}

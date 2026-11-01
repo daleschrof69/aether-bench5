@@ -1,0 +1,52 @@
+{
+  "summary": "Tested Aether auth + Stripe + docs feature. Backend pytest: 14/16 pass. Frontend: all flows pass (unauth redirect, login/signup, admin dashboard with 5000 credits + FOUNDING BUILDER, user profile popover, BuyCreditsModal with 6 tiers triggering POST /api/stripe/checkout 200, docs hub + article markdown rendering, /terms /privacy /payment routes, sign out). Two backend bugs found: (1) brute-force lockout broken behind k8s ingress, (2) /api/stripe/status returns 500.",
+  "backend_issues": {
+    "critical": [
+      {
+        "endpoint": "POST /api/auth/login",
+        "issue": "Brute-force lockout never triggers behind k8s ingress. identifier = f'{request.client.host}:{email}' and request.client.host returns the upstream pod IP, which varies between calls (observed 10.231.130.130 and 10.231.129.113 across consecutive POSTs from same test session). Result: 6 failed attempts on same email returned 401, 401, 401, 401, 401, 401 — never 429. Fix: derive identifier from X-Forwarded-For (first hop) or use email-only as the brute-force key (with optional IP as secondary).",
+        "priority": "HIGH"
+      },
+      {
+        "endpoint": "GET /api/stripe/status/{session_id}",
+        "issue": "Returns HTTP 500 with CheckoutError 'No such checkout.session: cs_test_...'. POST /api/stripe/checkout creates a session via the Emergent Stripe proxy (https://integrations.emergentagent.com/stripe/v1/checkout/sessions) and returns a real Stripe-style session_id, but emergentintegrations.StripeCheckout.get_checkout_status appears to query api.stripe.com directly, which does not know about that session. Either (a) get_checkout_status must also route through the Emergent proxy, or (b) wrap the call in try/except and surface a 502 with meaningful message instead of bare 500. /payment/success polling will fail silently in production.",
+        "priority": "HIGH"
+      }
+    ],
+    "minor": []
+  },
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Sidebar footer (left)", "issues": ["Bottom footer text 'TERMS OF SERVI...' and 'PRIVACY POLICY' partially clipped at 1920px viewport — long uppercase letter-spacing tracking pushes text beyond container. Not critical but cosmetically poor."]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_stripe.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Fix brute-force lockout identifier to be load-balancer-safe (use X-Forwarded-For first hop or pure email)",
+    "Fix /api/stripe/status to route status fetch through Emergent Stripe proxy (or catch CheckoutError and return 502 with descriptive payload)",
+    "Adjust sidebar footer text width / tracking so 'Terms of Service' and 'Privacy Policy' fit at 1920px"
+  ],
+  "critical_code_review_comments": [
+    "server.py line 266: ip = request.client.host — behind any reverse proxy this is unreliable. Use request.headers.get('x-forwarded-for', '').split(',')[0].strip() or trust X-Real-IP.",
+    "server.py line 439: sc.get_checkout_status(session_id) — no try/except. Any SDK error escapes as raw 500. Wrap and return controlled error.",
+    "server.py: no automatic refresh-token rotation endpoint exists despite refresh_token cookie being set on login/signup. Either implement /auth/refresh or document that the 1-day access_token is the de-facto session lifetime.",
+    "server.py public_user(): the conditional for member_since is fragile and may produce non-ISO strings if created_at is a string already that's not ISO — consider always storing datetime objects in mongo (motor handles BSON dates).",
+    "BuyCreditsModal.jsx line 47: window.location.href = data.url assumes data.url exists; no validation. Add fallback if Stripe checkout returns empty url.",
+    "BuyCreditsModal.jsx: PACKS/PLANS hard-coded on the frontend duplicate the source-of-truth PRICING_TIERS on the backend. Should fetch /api/stripe/pricing once and render dynamically to prevent drift."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_auth_stripe.py (created)"
+  ],
+  "success_rate": {"backend": "87.5% (14/16)", "frontend": "100% (all critical flows)"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 — works. Signup creates users with credits=100, plan=free.",
+  "seed_data_creation": "Tests create ephemeral TEST_/uuid users via /api/auth/signup. No cleanup performed (no admin delete endpoint).",
+  "retest_needed": true,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All UI flows verified working. Two backend issues to verify after main agent fix: (1) lockout via X-Forwarded-For — run TestBruteForce::test_lockout_after_failures, (2) Stripe status — run TestStripeCheckout::test_status_own_session. Use admin@aether.dev / aether_admin_2026. /api/stripe/checkout returns real test-mode Stripe URL successfully; redirect was confirmed by intercepting checkout.stripe.com navigation.",
+  "rca_of_the_issue": "1) lockout: identifier built from request.client.host which in k8s/ingress contexts is the upstream pod IP, not the client IP. Different pods serve different requests in a session → counter never reaches 5 for same identifier. 2) stripe/status 500: session created via emergent proxy is unknown to real Stripe API; SDK's get_checkout_status hits api.stripe.com (per error req_llObON2y... and 'No such checkout.session'). The create_checkout_session uses integrations.emergentagent.com but status path appears to bypass proxy."
+}

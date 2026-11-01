@@ -1,0 +1,32 @@
+{
+  "summary": "Tested new P1 IMEI Repair modal in demo mode. All 12 spec items PASSED: modal opens only via Repair IMEI button (never immediately), correct structure (title, imei1/imei2 inputs, legal checkbox, cancel/submit buttons), input sanitization (strips non-digits, caps at 15), Luhn validation (invalid=123456789012345 shows 'Invalid' + submit disabled; valid=490154203237518 shows 'Luhn OK'), submit gating requires both valid IMEI1 AND legal checkbox, IMEI2='123' correctly disables submit, empty IMEI2 allowed, submit streams demo log with '>>> EXECUTING (DEMO): Repair IMEI' and 'Writing IMEI1: 490154203237518' (entered value, not random), modal closes on submit, fields reset on reopen, Cancel closes+resets. Regression: Bypass FRP still fires directly (no modal), all 9 nav routes load, setup wizard trigger present, 0 console errors. One observation on auto-connect timing (see below).",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "observations": [
+    {
+      "area": "Auto-connect on dashboard load",
+      "issue": "Test spec expects device to auto-connect 'within a few seconds' of landing on dashboard. Waited 6.5s post-login and Repair IMEI button was still disabled (status=idle, no boot logs streaming yet). Had to click START SCAN manually to get a connected device. Once connected, all downstream modal tests passed. Likely cause: AuthContext verification (/api/auth/me) takes several seconds before AppShell mounts and boot sequence starts, so real elapsed wall-clock from login to auto-connect exceeds a 'few seconds'. Not blocking IMEI feature — flagging for main agent."
+    }
+  ],
+  "test_report_links": ["/app/test_reports/imei_after_submit.png"],
+  "action_items": [
+    "OPTIONAL: Investigate why device does not auto-connect within ~6s after login redirect to dashboard (AppShell/AppProvider likely mounts after AuthContext resolves). Consider a loading hint or verify autoConnect useEffect fires promptly."
+  ],
+  "critical_code_review_comments": [
+    "IMEIRepairModal.jsx (168 lines): Clean, single-responsibility Radix Dialog. Luhn implementation correct. Submit gating (imei1Valid && imei2Valid && agreed && status==='connected') is defensive.",
+    "AppContext.runAction: params.imei1/imei2 override device.imei/imei2 only when params.imei1 truthy — good, keeps other actions unaffected.",
+    "ActionGrid.handleAction: repair_imei correctly short-circuits to setImeiModalOpen(true) instead of runAction.",
+    "Minor: IMEIRepairModal reset happens on close via handleClose but also on explicit Cancel path — no double-reset issues observed."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "N/A (frontend-only test)", "frontend": "100% (12/12 IMEI spec items + regression)"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Test used seeded admin only.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "IMEI Repair modal (P1) fully verified in demo mode. Valid Luhn IMEI for tests: 490154203237518. Invalid: 123456789012345. To reach the connected state during tests, either wait 8-10s after login OR click the 'START SCAN (DEMO)' button on the Device Status panel — dashboard auto-connect boot chain (1.9s + 2.8s handshake) fires only after AuthContext finishes verifying, which can push total time past a naive wait. The Repair IMEI button on Dashboard uses platform=ALL so it enables for any chipset."
+}

@@ -1,0 +1,31 @@
+{
+  "summary": "Iteration 12 — Regression sweep after 4 frontend sub-component refactors (Sidebar, DownloadCliButton, DownloadDesktopButton, GetDesktopHeroCard) and 1 backend refactor (emergent_session_exchange → 3 helpers). ALL SPEC ITEMS PASS. Backend: 7/7 pytest passed on /app/backend/tests/test_session_refactor.py — POST /api/auth/session returns 400 on empty body / missing session_id, returns 401 on invalid session_id (proves _fetch_emergent_profile still surfaces upstream 401 correctly), admin login + /api/auth/me still work, unauthenticated /api/auth/me → 401. Frontend: (1) admin@aether.dev / aether_admin_2026 → dashboard mount OK, app-sidebar visible. (2) Sidebar sub-components — BrandHeader (brand-logo), CreditsWidget (credits-balance = '5000 Credits'), BuyCreditsCta (sidebar-buy-credits-btn), NavList (all 10 nav-* testids count=1), LicenseBadge ('LICENSE' + 'FOUNDING BUILDER' visible), UserProfile ('Aether Admin' visible) — all rendered. (3) Mobile hamburger @390×844: sidebar-mobile-toggle visible → clicked → sidebar-mobile-backdrop appeared → sidebar-mobile-close visible in drawer → clicking backdrop dismissed drawer cleanly. (4) DownloadCliButton: cli-download-trigger click opens cli-download-popover, all 4 platform testids (cli-download-darwin-arm64, cli-download-darwin-x64, cli-download-linux-x64, cli-download-windows-x64) present, cli-copy-install button clicks without error. (5) DownloadDesktopButton: desktop-download-trigger click opens desktop-download-popover, all 3 build rows (desktop-download-windows-x64, desktop-download-macos-universal, desktop-download-linux-x64) present, second click on trigger closes popover. (6) GetDesktopHeroCard: after localStorage.clear() the hero renders on /, all 4 testids (get-desktop-hero, get-desktop-hero-windows, get-desktop-hero-mac, get-desktop-hero-linux, get-desktop-hero-dismiss) present, clicking dismiss removes the card (count→0). (7) Dashboard core panels intact: device-status-panel, action-grid-panel, cloud-exploit-db all visible. Zero page JS errors during the entire flow.",
+  "backend_issues": {"critical": [], "minor": []},
+  "frontend_issues": {
+    "ui_bugs": [],
+    "integration_issues": [],
+    "design_issues": []
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_session_refactor.py",
+    "/app/test_reports/pytest/iteration_12.xml"
+  ],
+  "action_items": [],
+  "critical_code_review_comments": [
+    "Sidebar.jsx (186 lines): Clean sub-component split — BrandHeader, CreditsWidget, BuyCreditsCta, NavItem, NavList, LicenseBadge — all single-responsibility. NAV_ITEMS array is the single source of truth for nav rendering + testids. useEffect on location.pathname correctly closes the mobile drawer on route change. drawerCls ternary swap between -translate-x-full and translate-x-0 is fine; lg:translate-x-0 override for desktop is correct.",
+    "DownloadCliButton.jsx (149 lines): CliTrigger switches between primary/compact via variant prop — both variants share the same data-testid='cli-download-trigger' which is correct (only one is rendered at a time per instance). CliPopover uses a fixed inset-0 click-outside catcher — good pattern. Clipboard.writeText error is logged only in dev — clean.",
+    "DownloadDesktopButton.jsx (139 lines): Same pattern as CLI button — DesktopTrigger variant switch, DesktopPopover with inset-0 backdrop, BuildRow row component. Icons are attached to BUILDS entries and pulled via build.icon — clean data-driven rendering.",
+    "GetDesktopHeroCard.jsx (133 lines): dismissed state defaults to true and flips to false only after successful localStorage read — this prevents a flash of the card for users who already dismissed it. Nice defensive pattern. HeroInfo + HeroActions + ScanLineOverlay split is clean. Both .dmg / .AppImage anchors call onDismiss on click, which is consistent with the Windows path.",
+    "server.py emergent_session_exchange (10 lines) + 3 helpers (_fetch_emergent_profile / _upsert_google_user / _persist_emergent_session): Nice separation of concerns — HTTP fetch, DB upsert, and cookie/session persistence are each isolated. _fetch_emergent_profile correctly raises 401 on upstream non-200 (verified via curl-equivalent pytest). _upsert_google_user preserves the existing user_id on refresh and only overwrites name/picture — no unintended role/plan/credits reset on re-auth. _persist_emergent_session writes samesite=none;secure;httponly cookie consistent with the other auth cookies.",
+    "OBSERVATION (non-blocking): DesktopPopover has no Escape-to-close handler — only backdrop click + trigger toggle. Same for CliPopover. Minor UX polish opportunity but not a regression from this iteration."
+  ],
+  "updated_files": [
+    "/app/backend/tests/test_session_refactor.py (new — pytest coverage for refactored session endpoint + auth smoke)"
+  ],
+  "success_rate": {"backend": "100% (7/7 pytest)", "frontend": "100% (all 8 spec items PASSED)"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 (from /app/memory/test_credentials.md)",
+  "seed_data_creation": "None. Seeded admin only.",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "The 4 refactored frontend components + backend session refactor all verified — behavior is identical to iteration 11. Backend test file at /app/backend/tests/test_session_refactor.py covers 400/401 responses on POST /api/auth/session + admin login + /api/auth/me smoke — reuse for future auth refactor regression. Note: DownloadCliButton and DownloadDesktopButton popovers close on click-outside (fixed inset-0 catcher) or by clicking the trigger again — Escape key does NOT close them. Mobile sidebar drawer auto-closes on route change (useEffect on location.pathname) — so any test that navigates via a nav-* link will implicitly dismiss it. localStorage.clear() before test if you need GetDesktopHeroCard to be visible."
+}

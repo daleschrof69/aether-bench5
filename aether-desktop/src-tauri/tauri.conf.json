@@ -1,0 +1,81 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Aether Repair Tool",
+  "version": "0.1.0",
+  "identifier": "dev.aether.repair",
+  "build": {
+    "beforeDevCommand": "",
+    "beforeBuildCommand": "",
+    "devUrl": "https://mtk-qualcomm-tool.emergent.host",
+    "frontendDist": "../public"
+  },
+  "app": {
+    "withGlobalTauri": false,
+    "windows": [
+      {
+        "title": "Aether Repair Tool",
+        "label": "main",
+        "url": "https://mtk-qualcomm-tool.emergent.host",
+        "width": 1600,
+        "height": 1000,
+        "minWidth": 1100,
+        "minHeight": 700,
+        "resizable": true,
+        "fullscreen": false,
+        "decorations": true,
+        "transparent": false,
+        "alwaysOnTop": false,
+        "skipTaskbar": false,
+        "theme": "Dark",
+        "titleBarStyle": "Visible",
+        "shadow": true,
+        "backgroundColor": "#000000"
+      }
+    ],
+    "security": {
+      "csp": null,
+      "dangerousDisableAssetCspModification": false
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["msi", "nsis", "deb", "appimage", "dmg"],
+    "category": "DeveloperTool",
+    "shortDescription": "Aether Repair Tool — MTK / Qualcomm / iPhone / Samsung repair console.",
+    "longDescription": "Unified repair console for licensed technicians. Bundles the Aether web dashboard with the local CLI bridge so the dashboard talks to USB devices directly — no browser required.",
+    "copyright": "© 2026 Aether Labs",
+    "license": "Proprietary",
+    "publisher": "Aether Labs",
+    "homepage": "https://mtk-qualcomm-tool.emergent.host",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "windows": {
+      "wix": {
+        "language": ["en-US"],
+        "upgradeCode": "12345678-1234-1234-1234-1234567890AB"
+      },
+      "nsis": {
+        "installerIcon": "icons/icon.ico",
+        "installMode": "perMachine",
+        "displayLanguageSelector": false
+      },
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper"
+      }
+    },
+    "macOS": {
+      "frameworks": [],
+      "minimumSystemVersion": "10.15"
+    },
+    "linux": {
+      "deb": {
+        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+      }
+    }
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "summary": "Comprehensive sweep of Aether web app (backend + frontend). Backend pytest: 16/16 PASS (previous bugs — brute-force lockout, Stripe status 500 — are FIXED). Frontend: all P0/P1 flows pass — admin login → dashboard with 5000 credits + Founding Builder banner; signup → 100 credits; all 8 sidebar routes navigate without 404/blank; Get Desktop popover renders all 3 builds (windows-x64 / macos-universal / linux-x64) via braidenbarker/aether release URLs; Aether CLI popover renders all 4 builds (darwin-arm64 / darwin-x64 / linux-x64 / windows-x64); MTK action grid (8+ ops) renders; Documentation renders all 3 articles; Buy Credits modal opens from sidebar; User profile popover + Sign Out work; demo banner dismiss persists across navigation; no horizontal overflow at 1024 / 768 / 375 px viewports. Only P2 cosmetic issues remain.",
+  "backend_issues": {
+    "critical": [],
+    "minor": [
+      {"endpoint": "GET /api/auth/me (unauth)", "issue": "Returns 401 as designed but the bootstrap /me probe fires before login on /login route, causing 3-6 red 401 entries in browser console. Cosmetic — consider guarding the bootstrap fetch behind an existing-cookie check or downgrade the client log."}
+    ]
+  },
+  "frontend_issues": {
+    "ui_bugs": [
+      {"component": "GetDesktopHeroCard", "issue": "At 375px mobile viewport the hero card renders as an extremely narrow vertical column with single-letter wrapping (text 'GET AETHER FOR WINDOWS' stacks letter-by-letter). The grid/flex layout does not collapse to a stacked mobile layout. Looks broken on small screens.", "selector": "[data-testid=\"get-desktop-hero\"]", "priority": "P2"},
+      {"component": "Login form / Signup form", "issue": "No visible inline validation error rendered for empty-submit or wrong-password attempts (no element matched .error / [class*=error] / [role=alert]). Either errors are missing or styled with non-standard classes. Verify a user-facing error appears (toast OR inline) on wrong credentials and weak/mismatched passwords.", "selector": "form input[type=password]", "priority": "P2"},
+      {"component": "Sidebar footer", "issue": "Still present from iteration 1 — Terms of Service / Privacy Policy text clipped due to wide letter-spacing at 1920px sidebar width.", "selector": "aside footer", "priority": "P2"}
+    ],
+    "integration_issues": [],
+    "design_issues": [
+      {"screen": "Dashboard hero on mobile (≤480px)", "issues": ["GetDesktopHeroCard does not stack vertically — text wraps to 1 char per line"]},
+      {"screen": "Sidebar footer", "issues": ["Footer text overflow as reported in iteration 1"]}
+    ]
+  },
+  "test_report_links": [
+    "/app/backend/tests/test_auth_stripe.py",
+    "/app/test_reports/pytest/pytest_results.xml"
+  ],
+  "action_items": [
+    "Add a mobile breakpoint (sm:/md:) to GetDesktopHeroCard so the right-side build panel stacks under the hero text on <640px viewports.",
+    "Ensure Login/Signup forms render a visible error element (e.g. <p role=alert className=\"error\">…</p>) on invalid submit — current implementation produced no DOM error element my selector could find.",
+    "Optional: gate the initial /api/auth/me probe behind document.cookie.includes('access_token') so the /login page doesn't fire a 401 in console.",
+    "Optional: shrink letter-spacing or widen sidebar so Terms / Privacy footer fits."
+  ],
+  "critical_code_review_comments": [
+    "DownloadDesktopButton.jsx and DownloadCliButton.jsx hardcode VERSION='0.1.0' — when CI bumps the release version, both files must be edited. Move to a shared const or read from package.json / env.",
+    "DownloadCliButton.jsx line 21: installCmd points at https://get.aether.sh/cli.sh — verify this host actually resolves (likely not provisioned yet; broken curl pipe). Either ship a real install script or point at the GitHub raw URL.",
+    "GetDesktopHeroCard responsive layout uses grid without a mobile fallback — confirmed broken at 375px.",
+    "/api/auth/me 401 noise on /login: standard fix is to only fetch /me if a session indicator exists (e.g. localStorage flag or non-httpOnly cookie like 'aether.loggedIn').",
+    "Pricing page (Pricing.jsx) uses inline tier definitions ({label:'Starter'…}) — duplicates backend PRICING_TIERS. Same drift risk as BuyCreditsModal previously flagged.",
+    "Sidebar 'BUY CREDITS' button lacks a stable data-testid (had to fall back to text matcher) — add data-testid=\"sidebar-buy-credits\" for testability."
+  ],
+  "updated_files": [],
+  "success_rate": {"backend": "100% (16/16)", "frontend": "≈95% — all P0/P1 pass; 3 P2 cosmetic/validation issues"},
+  "test_credentials": "admin@aether.dev / aether_admin_2026 confirmed working. Signup self-test created ephemeral test_<uuid>@aether.dev users (no cleanup endpoint).",
+  "seed_data_creation": "None beyond ephemeral signup users created by pytest (no orphan/test data pollution beyond what iteration 1 already created).",
+  "retest_needed": false,
+  "main_agent_can_self_test": true,
+  "context_for_next_testing_agent": "All previously-reported backend bugs (brute-force lockout + Stripe status 500) are fixed and verified by /app/backend/tests/test_auth_stripe.py (16/16 pass). Frontend is shippable for desktop viewport; only P2 cosmetic items remain — chiefly (1) GetDesktopHeroCard mobile layout, (2) Login/Signup inline validation error visibility, (3) pre-login /api/auth/me 401 console noise, (4) sidebar footer text clipping. GitHub release URLs are correctly pointed at github.com/braidenbarker/aether/releases/latest/download — actual file resolution will 404 until the maintainer publishes the draft release (per request: verify URLs only, do not resolve).",
+  "rca_of_the_issue": "GetDesktopHeroCard mobile breakage: the component uses a fixed multi-column grid without responsive breakpoint classes. At <480px the right-hand build column compresses to ~40px width forcing 1-char-per-line wrapping of the title. Fix: add `flex-col md:flex-row` (or `grid-cols-1 md:grid-cols-[1fr_320px]`) to the outer wrapper and re-test at 375px / 414px / 768px."
+}

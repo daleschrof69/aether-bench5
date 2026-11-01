@@ -1,0 +1,124 @@
+{
+  "theme": "dark",
+  "archetype": "7 (Electric & Neon - Terminal/Hacker Tool Vibe)",
+  "global_rules": {
+    "app_type": "desktop_utility",
+    "description": "Professional Windows utility-style dashboard for mobile repair (Aether Repair Tool). Focus on density, technical aesthetics, and high-contrast terminal elements.",
+    "forbidden_colors": ["#1B93A4", "purple-blue gradients", "#7351B7"],
+    "forbidden_fonts": ["Inter (for headings)", "Roboto", "Open Sans", "Space Grotesk"]
+  },
+  "colors": {
+    "base": {
+      "background": "#000000",
+      "surface": "#09090B",
+      "surface_elevated": "#121216",
+      "border": "rgba(255, 255, 255, 0.1)"
+    },
+    "accents": {
+      "primary": "#00FF41",
+      "primary_hover": "#00CC33",
+      "primary_muted": "rgba(0, 255, 65, 0.1)",
+      "secondary": "#06B6D4",
+      "danger": "#EF4444",
+      "warning": "#EAB308",
+      "info": "#3B82F6"
+    },
+    "terminal": {
+      "background": "#050505",
+      "text": "#00FF41",
+      "timestamp": "#6B7280",
+      "error": "#EF4444",
+      "success": "#00FF41",
+      "warn": "#EAB308",
+      "info": "#06B6D4"
+    },
+    "text": {
+      "primary": "#F8FAFC",
+      "secondary": "#94A3B8",
+      "muted": "#52525B"
+    }
+  },
+  "typography": {
+    "font_family": {
+      "headings": "IBM Plex Sans, sans-serif",
+      "body": "IBM Plex Sans, sans-serif",
+      "mono": "JetBrains Mono, monospace"
+    },
+    "hierarchy": {
+      "h1": "text-2xl font-bold tracking-tight",
+      "h2": "text-xl font-semibold tracking-tight",
+      "h3": "text-lg font-medium",
+      "body": "text-sm",
+      "small": "text-xs uppercase tracking-[0.2em]"
+    }
+  },
+  "layout": {
+    "strategy": "Control Room Grid",
+    "grid_system": "grid-cols-1 md:grid-cols-12 gap-4",
+    "spacing": {
+      "container": "p-4 or p-6",
+      "panel": "p-4"
+    },
+    "panels": {
+      "style": "Grid Borders (Technical Look)",
+      "border": "border border-white/10",
+      "background": "bg-[#09090B]",
+      "radius": "rounded-none or rounded-sm (max 4px)"
+    }
+  },
+  "components": {
+    "window_chrome": {
+      "description": "Fake Windows desktop title bar at the top with App Name and Window Controls (Min, Max, Close).",
+      "height": "h-8",
+      "background": "bg-black",
+      "border": "border-b border-white/10"
+    },
+    "sidebar": {
+      "width": "w-64",
+      "items": ["Dashboard", "MTK Service", "Qualcomm Service", "Logs", "Settings"],
+      "active_state": "bg-[#00FF41]/10 text-[#00FF41] border-l-2 border-[#00FF41]"
+    },
+    "device_status": {
+      "grid_span": "col-span-12 lg:col-span-4",
+      "visuals": "Large typography, blinking cursor or pulse animation for 'Searching...', solid green for 'Device Detected'."
+    },
+    "device_info_panel": {
+      "grid_span": "col-span-12 lg:col-span-4",
+      "style": "Dense table, 1px borders, monospace font for data values (IMEI, Serial)."
+    },
+    "action_grid": {
+      "grid_span": "col-span-12 lg:col-span-4",
+      "layout": "grid grid-cols-2 gap-3",
+      "buttons": {
+        "style": "Flat, sharp edges, 1px border border-[#00FF41]/30 hover:bg-[#00FF41]/10 text-white hover:text-[#00FF41] transition-colors",
+        "danger_style": "border-red-500/30 hover:bg-red-500/10 text-white hover:text-red-500"
+      }
+    },
+    "console": {
+      "grid_span": "col-span-12",
+      "height": "h-64",
+      "style": "Retro-Futurism (Terminal Look). bg-[#050505] border border-white/10. Monospace text. Auto-scrolling to bottom.",
+      "lines": [
+        "Include timestamps (e.g. [14:02:45])",
+        "Color code levels: [INFO] cyan, [SUCCESS] green, [WARN] yellow, [ERROR] red"
+      ]
+    }
+  },
+  "motion": {
+    "animations": {
+      "pulse": "Subtle opacity pulse for 'Searching...' status",
+      "console_scroll": "Smooth snap to bottom as new logs appear",
+      "hover": "Instant background tint change (0.1s ease) for buttons to feel highly responsive"
+    }
+  },
+  "media_and_images": {
+    "instructions": "No external photos required. Use SVGs and Phosphor Icons (@phosphor-icons/react) or Lucide for technical icons (USB port, microchip, terminal, settings). Ensure icon strokes are sharp and align with the monospace/technical aesthetic."
+  },
+  "instructions_to_main_agent": [
+    "Install `lucide-react` for icons if not present. Use sharp, technical icons.",
+    "Simulate device connection logic using a `useEffect` and `setTimeout` to transition from 'Searching...' to 'Device Detected: MT6895'.",
+    "Generate random mock data for IMEI, Serial, and Android version during the simulated connection.",
+    "Implement the console as a scrollable `div` that receives log append events. Create a custom hook `useTerminal` to manage log state.",
+    "Ensure the entire app is wrapped in a container that mimics a desktop window (100vh height, overflow hidden, custom scrollbars)."
+  ]
+}
