@@ -16,15 +16,20 @@ const SUPPORTED = [
 const SOC = ["A12", "A13", "A14", "A15", "A16", "A17 Pro", "A18", "A18 Pro"];
 
 const IPHONE_ACTIONS = [
-  { key: "read_info",         label: "Modern Diagnostic", icon: Activity,     cost: "20 Credits", danger: false, desc: "Full hardware fingerprint + trust-cache audit.", testid: "iphone-action-diag" },
-  { key: "icloud_check",      label: "Activation Probe",  icon: Search,       cost: "5 Credits",  danger: false, desc: "Detect Activation Lock / iCloud status (read-only).", testid: "iphone-action-probe" },
-  { key: "passcode_recover",  label: "Passcode Recovery", icon: Lock,         cost: "30 Credits", danger: false, desc: "Brute-tolerant recovery flow via DFU pipeline.", testid: "iphone-action-passcode" },
-  { key: "trust_audit",       label: "Trust Cache Audit", icon: ShieldCheck,  cost: "10 Credits", danger: false, desc: "Verify SecureROM signatures vs Apple ground-truth.", testid: "iphone-action-trust" },
+  { key: "read_info",         label: "Modern Diagnostic", icon: Activity,     cost: "Free", danger: false, desc: "Full hardware fingerprint + trust-cache audit.", testid: "iphone-action-diag" },
+  { key: "icloud_check",      label: "Activation Probe",  icon: Search,       cost: "Free",  danger: false, desc: "Detect Activation Lock / iCloud status (read-only).", testid: "iphone-action-probe" },
+  { key: "passcode_recover",  label: "Passcode Recovery", icon: Lock,         cost: "Free", danger: false, desc: "Brute-tolerant recovery flow via DFU pipeline.", testid: "iphone-action-passcode" },
+  { key: "trust_audit",       label: "Trust Cache Audit", icon: ShieldCheck,  cost: "Free", danger: false, desc: "Verify SecureROM signatures vs Apple ground-truth.", testid: "iphone-action-trust" },
   { key: "apple_info",        label: "Recovery Query",    icon: Search,       cost: "Free",       danger: false, desc: "irecovery -q. ECID, board, and mode from Recovery or DFU.", testid: "iphone-action-recovery" },
   { key: "apple_lockdown",    label: "Lockdown Info",     icon: Activity,     cost: "Free",       danger: false, desc: "ideviceinfo. Paired device identity. Phone must be trusted.", testid: "iphone-action-lockdown" },
   { key: "apple_diagnostics", label: "Diagnostics",       icon: ShieldCheck,  cost: "Free",       danger: false, desc: "idevicediagnostics. Hardware report from a trusted device.", testid: "iphone-action-diagnostics" },
   { key: "apple_list",        label: "List Devices",      icon: Smartphone,   cost: "Free",       danger: false, desc: "idevice_id -l. UDIDs currently on usbmuxd.", testid: "iphone-action-list" },
   { key: "apple_restore",     label: "Official Restore",  icon: AlertTriangle, cost: "Free",      danger: true,  desc: "idevicerestore erase with the latest Apple-signed IPSW. Does not skip Activation Lock.", testid: "iphone-action-restore" },
+  { key: "official_apple_id", label: "idevice_id -l", icon: Smartphone, cost: "Free", danger: false, desc: "Official usbmux device list.", testid: "official-apple-id" },
+  { key: "official_apple_info", label: "ideviceinfo", icon: Activity, cost: "Free", danger: false, desc: "Official lockdown identity. The phone must be trusted.", testid: "official-apple-info" },
+  { key: "official_apple_diagnostics", label: "idevicediagnostics", icon: ShieldCheck, cost: "Free", danger: false, desc: "Official hardware diagnostics report.", testid: "official-apple-diagnostics" },
+  { key: "official_apple_recovery", label: "irecovery -q", icon: Search, cost: "Free", danger: false, desc: "Official Recovery/DFU query: ECID, board, and mode.", testid: "official-apple-recovery" },
+  { key: "official_apple_pair", label: "idevicepair validate", icon: ShieldCheck, cost: "Free", danger: false, desc: "Official check that this computer is still paired.", testid: "official-apple-pair" },
 ];
 
 export default function IPhoneService() {
@@ -32,16 +37,16 @@ export default function IPhoneService() {
   const isApple = device && (device.platform === "Apple" || device.brand?.toLowerCase().includes("iphone"));
 
   const handleClick = (a) => {
-    if (status !== "connected") {
+    if (status !== "connected" && !a.key.startsWith("official_")) {
       pushLog("ERROR", "Connect a target device before running iPhone operations.");
       return;
     }
-    runAction(a.key, a.label);
+    runAction(a.key, a.label, {}, a.cost);
   };
 
   return (
-    <div data-testid="iphone-page" className="h-full flex flex-col gap-3 p-4 overflow-y-auto">
-      <div className="bg-[#09090B] border border-white/10 p-5 flex items-center gap-4 flex-shrink-0 relative overflow-hidden">
+    <div data-testid="iphone-page" className="h-full min-h-0 flex flex-col gap-3 p-4 overflow-y-auto lg:overflow-hidden">
+      <div className="bg-[#09090B] border border-white/10 p-5 flex flex-wrap items-center gap-4 flex-shrink-0 relative overflow-hidden">
         <div className="absolute -right-10 -top-10 w-44 h-44 opacity-[0.04] pointer-events-none">
           <img src={LOGO_URL} alt="" className="w-full h-full object-contain" />
         </div>
@@ -53,11 +58,11 @@ export default function IPhoneService() {
             className="absolute -top-2 -right-2 w-5 h-5 object-contain bg-black p-0.5 border border-[#00FF41]/40"
           />
         </div>
-        <div className="flex-1 relative">
+        <div className="flex-1 min-w-0 relative">
           <div className="flex items-center gap-2">
             <h1 data-testid="iphone-page-title" className="text-xl font-bold tracking-tight">iPhone Service Module</h1>
           </div>
-          <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-white/40 mt-1">
+          <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-white/40 mt-1 break-words">
             DFU Pipeline · checkm8 / pongoOS · A12 → A18 SoC
           </p>
         </div>
@@ -78,8 +83,8 @@ export default function IPhoneService() {
       )}
 
       {/* Body */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-shrink-0">
-        <div className="lg:col-span-8">
+      <div className="grid grid-cols-1 lg:grid-cols-12 lg:grid-rows-[minmax(0,1fr)] gap-3 flex-none lg:flex-1 min-h-0 overflow-visible lg:overflow-hidden">
+        <div className="lg:col-span-8 h-auto min-h-0 lg:h-full overflow-visible lg:overflow-y-auto">
           <div className="bg-[#09090B] border border-white/10">
             <div className="px-4 py-3 border-b border-white/10 flex items-center gap-2">
               <Activity className="w-3.5 h-3.5 text-[#00FF41]" />
@@ -94,7 +99,7 @@ export default function IPhoneService() {
                   <button
                     key={a.key}
                     data-testid={a.testid}
-                    disabled={status !== "connected" || activeAction}
+                    disabled={(status !== "connected" && !a.key.startsWith("official_")) || activeAction}
                     onClick={() => handleClick(a)}
                     className="group bg-[#09090B] p-5 flex flex-col items-start gap-3 transition-colors min-h-[140px] disabled:opacity-40 disabled:cursor-not-allowed enabled:hover:bg-[#00FF41]/5 text-left"
                   >
@@ -124,7 +129,7 @@ export default function IPhoneService() {
           </div>
         </div>
 
-        <div className="lg:col-span-4 space-y-3">
+        <div className="lg:col-span-4 h-auto min-h-0 lg:h-full overflow-visible lg:overflow-y-auto space-y-3">
           <div className="bg-[#09090B] border border-white/10 p-4">
             <div className="font-mono text-[10px] tracking-[0.25em] uppercase text-white/50 mb-3">
               Supported devices
@@ -158,7 +163,7 @@ export default function IPhoneService() {
         </div>
       </div>
 
-      <div className="flex-1 min-h-0">
+      <div className="h-[200px] flex-shrink-0">
         <Console height="h-full" />
       </div>
     </div>

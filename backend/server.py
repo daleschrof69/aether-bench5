@@ -21,7 +21,11 @@ from fastapi.responses import JSONResponse, FileResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
+from pymongo import ReturnDocument
+from pymongo.errors import DuplicateKeyError
 import httpx
+
+from op_pricing import quote_op
 
 try:
     from emergentintegrations.payments.stripe.checkout import (
@@ -46,6 +50,17 @@ EMERGENT_SESSION_DATA_URL = "https://demobackend.emergentagent.com/auth/v1/env/o
 
 # CORS allowlist — explicit origins only. Credentialed CORS cannot use a wildcard.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
+if "http://localhost:3000" in CORS_ORIGINS and "http://127.0.0.1:3000" not in CORS_ORIGINS:
+    CORS_ORIGINS.append("http://127.0.0.1:3000")
+# Desktop window and the offline UI server. Credentialed CORS needs each origin listed.
+for _desktop_origin in (
+    "http://localhost:4173",
+    "http://127.0.0.1:4173",
+    "http://tauri.localhost",
+    "https://tauri.localhost",
+):
+    if _desktop_origin not in CORS_ORIGINS:
+        CORS_ORIGINS.append(_desktop_origin)
 
 # Server-side fixed pricing — NEVER accept amount from client
 PRICING_TIERS = {
@@ -133,11 +148,18 @@ def create_refresh_token(user_id: str) -> str:
     return pyjwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-def set_jwt_cookies(response: Response, user_id: str, email: str) -> None:
+def _cookie_secure(request: Request) -> bool:
+    forwarded = request.headers.get("x-forwarded-proto", "")
+    proto = forwarded.split(",")[0].strip() if forwarded else request.url.scheme
+    return proto == "https"
+
+
+def set_jwt_cookies(response: Response, user_id: str, email: str, *, secure: bool) -> None:
     access = create_access_token(user_id, email)
     refresh = create_refresh_token(user_id)
-    response.set_cookie("access_token", access, httponly=True, secure=True, samesite="none", max_age=ACCESS_TOKEN_TTL_MIN * 60, path="/")
-    response.set_cookie("refresh_token", refresh, httponly=True, secure=True, samesite="none", max_age=REFRESH_TOKEN_TTL_DAYS * 86400, path="/")
+    samesite = "none" if secure else "lax"
+    response.set_cookie("access_token", access, httponly=True, secure=secure, samesite=samesite, max_age=ACCESS_TOKEN_TTL_MIN * 60, path="/")
+    response.set_cookie("refresh_token", refresh, httponly=True, secure=secure, samesite=samesite, max_age=REFRESH_TOKEN_TTL_DAYS * 86400, path="/")
 
 
 def clear_auth_cookies(response: Response) -> None:
@@ -256,7 +278,7 @@ async def _clear_failures(identifier: str) -> None:
 # Auth endpoints
 # ────────────────────────────────────────────────────────────────────────────
 @api_router.post("/auth/signup")
-async def signup(payload: SignupRequest, response: Response):
+async def signup(payload: SignupRequest, request: Request, response: Response):
     email = payload.email.lower().strip()
     if await db.users.find_one({"email": email}):
         raise HTTPException(status_code=400, detail="Email already registered")
@@ -275,7 +297,7 @@ async def signup(payload: SignupRequest, response: Response):
         "created_at": now,
     }
     await db.users.insert_one(doc)
-    set_jwt_cookies(response, user_id, email)
+    set_jwt_cookies(response, user_id, email, secure=_cookie_secure(request))
     return public_user(doc)
 
 
@@ -292,7 +314,7 @@ async def login(payload: LoginRequest, request: Request, response: Response):
         await _register_failure(identifier)
         raise HTTPException(status_code=401, detail="Invalid email or password")
     await _clear_failures(identifier)
-    set_jwt_cookies(response, user["user_id"], email)
+    set_jwt_cookies(response, user["user_id"], email, secure=_cookie_secure(request))
     return public_user(user)
 
 
@@ -351,7 +373,7 @@ async def _upsert_google_user(profile: Dict[str, Any]) -> Dict[str, Any]:
     return user
 
 
-async def _persist_emergent_session(user: Dict[str, Any], session_token: str, response: Response) -> None:
+async def _persist_emergent_session(user: Dict[str, Any], session_token: str, response: Response, *, secure: bool) -> None:
     """Insert user_sessions row and set the httpOnly session_token cookie."""
     expires_at = (datetime.now(timezone.utc) + timedelta(days=EMERGENT_SESSION_TTL_DAYS)).isoformat()
     await db.user_sessions.insert_one(
@@ -366,8 +388,8 @@ async def _persist_emergent_session(user: Dict[str, Any], session_token: str, re
         key="session_token",
         value=session_token,
         httponly=True,
-        secure=True,
-        samesite="none",
+        secure=secure,
+        samesite="none" if secure else "lax",
         max_age=EMERGENT_SESSION_TTL_DAYS * 86400,
         path="/",
     )
@@ -382,7 +404,7 @@ async def emergent_session_exchange(request: Request, response: Response):
         raise HTTPException(status_code=400, detail="session_id required")
     profile = await _fetch_emergent_profile(session_id)
     user = await _upsert_google_user(profile)
-    await _persist_emergent_session(user, profile["session_token"], response)
+    await _persist_emergent_session(user, profile["session_token"], response, secure=_cookie_secure(request))
     return public_user(user)
 
 
@@ -410,6 +432,89 @@ async def _grant_purchase(user_id: str, tier_id: str) -> None:
         op["$inc"] = inc
     if op:
         await db.users.update_one({"user_id": user_id}, op)
+
+
+class CreditSpendRequest(BaseModel):
+    action_key: str = Field(min_length=1, max_length=64)
+    op_id: str = Field(min_length=8, max_length=80)
+    cost: int = Field(ge=0, le=1000)
+
+
+class CreditRefundRequest(BaseModel):
+    op_id: str = Field(min_length=8, max_length=80)
+
+
+_credit_ops_indexed = False
+
+
+async def _credit_ops_index() -> None:
+    global _credit_ops_indexed
+    if _credit_ops_indexed:
+        return
+    await db.credit_ops.create_index("op_id", unique=True)
+    _credit_ops_indexed = True
+
+
+@api_router.post("/credits/spend")
+async def spend_credits(payload: CreditSpendRequest, user=Depends(get_current_user)):
+    """Charge the signed-in wallet for one operation. Same op_id is idempotent."""
+    try:
+        cost = quote_op(payload.action_key, payload.cost)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    fresh = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+    if cost == 0:
+        return {"credits": (fresh or user).get("credits", 0), "charged": 0, "op_id": payload.op_id}
+    await _credit_ops_index()
+    try:
+        await db.credit_ops.insert_one(
+            {
+                "op_id": payload.op_id,
+                "user_id": user["user_id"],
+                "action_key": payload.action_key,
+                "charged": cost,
+                "status": "pending",
+                "created_at": datetime.now(timezone.utc).isoformat(),
+            }
+        )
+    except DuplicateKeyError:
+        existing = await db.credit_ops.find_one({"op_id": payload.op_id}, {"_id": 0})
+        if not existing or existing.get("user_id") != user["user_id"]:
+            raise HTTPException(status_code=409, detail="op_id already used")
+        account = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+        charged = existing.get("charged", 0) if existing.get("status") == "charged" else 0
+        return {"credits": (account or {}).get("credits", 0), "charged": charged, "op_id": payload.op_id, "status": existing.get("status")}
+    updated = await db.users.find_one_and_update(
+        {"user_id": user["user_id"], "credits": {"$gte": cost}},
+        {"$inc": {"credits": -cost}},
+        return_document=ReturnDocument.AFTER,
+    )
+    if not updated:
+        await db.credit_ops.update_one({"op_id": payload.op_id}, {"$set": {"status": "rejected"}})
+        raise HTTPException(status_code=402, detail="Not enough credits")
+    await db.credit_ops.update_one({"op_id": payload.op_id}, {"$set": {"status": "charged"}})
+    return {"credits": updated.get("credits", 0), "charged": cost, "op_id": payload.op_id}
+
+
+@api_router.post("/credits/refund")
+async def refund_credits(payload: CreditRefundRequest, user=Depends(get_current_user)):
+    """Return credits when a charged operation fails before it changes the phone."""
+    op = await db.credit_ops.find_one_and_update(
+        {"op_id": payload.op_id, "user_id": user["user_id"], "status": "charged"},
+        {"$set": {"status": "refunded", "refunded_at": datetime.now(timezone.utc).isoformat()}},
+    )
+    if op:
+        updated = await db.users.find_one_and_update(
+            {"user_id": user["user_id"]},
+            {"$inc": {"credits": int(op.get("charged", 0))}},
+            return_document=ReturnDocument.AFTER,
+        )
+        return {"credits": (updated or {}).get("credits", 0), "refunded": int(op.get("charged", 0))}
+    existing = await db.credit_ops.find_one({"op_id": payload.op_id, "user_id": user["user_id"]}, {"_id": 0})
+    if existing and existing.get("status") == "refunded":
+        account = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
+        return {"credits": (account or {}).get("credits", 0), "refunded": 0}
+    raise HTTPException(status_code=404, detail="No charged operation to refund")
 
 
 def _stripe_client(webhook_url: str):

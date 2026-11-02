@@ -64,16 +64,14 @@
       <h1>Aether Repair Tool</h1>
       <p id="msg">Connecting to console&hellip;</p>
       <p style="opacity:.5">
-        If this screen persists, check your network or visit
-        <a href="https://mtk-qualcomm-tool.emergent.host" id="link" target="_blank" rel="noreferrer">
-          mtk-qualcomm-tool.emergent.host
-        </a>
+        If this screen persists, the local console is not running.
+        <a href="http://localhost:3000" id="link">Open localhost:3000</a>
       </p>
     </div>
     <script>
       // Hard fallback: if Tauri didn't load the remote URL within 6s, try to
       // redirect manually so the user isn't stuck on the splash.
-      var REMOTE = "https://mtk-qualcomm-tool.emergent.host";
+      var REMOTE = "http://localhost:3000";
       setTimeout(function () {
         try {
           if (location.href.indexOf("tauri.localhost") === 0 ||

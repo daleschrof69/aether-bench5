@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Usb, Smartphone, Info, Loader2, CheckCircle2, XCircle } from "lucide-react";
 import { useApp } from "../context/AppContext";
-import { ActionGrid, MTP_ACTIONS } from "../components/ActionGrid";
+import { ActionGrid, MTP_ACTIONS, OFFICIAL_ACTIONS } from "../components/ActionGrid";
 import { Console } from "../components/Console";
 
 const DEMO_DEVICES = [
@@ -9,7 +9,7 @@ const DEMO_DEVICES = [
 ];
 
 export default function MTPService() {
-  const { cliBridge, pushLog, runAction } = useApp();
+  const { cliBridge, pushLog, connectMtp } = useApp();
   const [scanning, setScanning] = useState(false);
   const [result, setResult] = useState(null);
   const [demoMode, setDemoMode] = useState(false);
@@ -38,6 +38,7 @@ export default function MTPService() {
       setResult({ detected, count: res?.count ?? devices.length, devices });
       if (detected) {
         pushLog?.("SUCCESS", `MTP: ${devices.length} device(s) detected.`);
+        connectMtp?.(devices[0]);
       } else {
         pushLog?.("INFO", "No MTP device detected.");
       }
@@ -128,8 +129,8 @@ export default function MTPService() {
                 >
                   <Smartphone className="w-3.5 h-3.5 text-[#00FF41]" />
                   <span>
-                    bus {d.bus} · addr {d.addr} | {d.vid}:{d.pid} | {d.mode || "MTP"} |{" "}
-                    {d.manufacturer || "—"} {d.product || ""}
+                    {d.bus ? `bus ${d.bus} · addr ${d.addr} | ` : ""}{d.vid}:{d.pid} | {d.mode || "MTP"} |{" "}
+                    {d.manufacturer || "—"} {d.product || ""}{d.serial ? ` · ${d.serial}` : ""}
                   </span>
                 </li>
               ))}
@@ -145,7 +146,10 @@ export default function MTPService() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-shrink-0">
         <div className="lg:col-span-7">
-          <ActionGrid platform="MTP" actions={MTP_ACTIONS} title="MTP Operations" />
+          <ActionGrid platform="MTP" actions={MTP_ACTIONS} title="MTP Operations" columns={2} />
+          <div className="mt-3">
+            <ActionGrid platform="ALL" actions={OFFICIAL_ACTIONS} title="Official Commands" columns={2} requireDevice={false} />
+          </div>
         </div>
         <div className="lg:col-span-5 min-h-[280px]">
           <Console height="h-full" />
@@ -162,7 +166,9 @@ export default function MTPService() {
             </p>
             <p className="font-mono text-[11px] text-white/50">
               Detection runs via the local CLI bridge method{" "}
-              <code className="text-[#00FF41]">mtp.detect</code>.
+              <code className="text-[#00FF41]">mtp.detect</code>. List Files and Pull File
+              stream through the console. Pull copies DCIM, Download, or the first
+              folder into <code className="text-[#00FF41]">%USERPROFILE%\aether-mtp</code>.
             </p>
           </div>
         </div>

@@ -36,7 +36,7 @@ export default function Signup() {
   };
 
   return (
-    <div className="min-h-screen w-screen bg-black flex flex-col">
+    <div className="h-dvh min-h-0 w-full overflow-y-auto bg-black flex flex-col">
       <div className="absolute inset-0 bg-grid opacity-40 pointer-events-none" />
       <div className="absolute inset-0 bg-noise opacity-30 pointer-events-none" />
 

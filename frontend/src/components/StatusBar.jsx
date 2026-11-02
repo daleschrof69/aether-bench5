@@ -42,18 +42,18 @@ export const StatusBar = () => {
   return (
     <div
       data-testid="status-bar"
-      className="h-7 flex-shrink-0 bg-black border-t border-white/10 flex items-center justify-between px-4 font-mono text-[10px] tracking-[0.18em] uppercase text-white/50"
+      className="h-7 flex-shrink-0 bg-black border-t border-white/10 flex items-center justify-between gap-3 px-2 sm:px-4 font-mono text-[10px] tracking-[0.18em] uppercase text-white/50"
     >
-      <div className="flex items-center gap-4">
+      <div className="min-w-0 flex items-center gap-2 sm:gap-4 whitespace-nowrap">
         <div className="flex items-center gap-2">
           <span className={`w-1.5 h-1.5 ${dot}`} />
           <span>{status}</span>
         </div>
-        <span className="text-white/20">|</span>
-        <span>Port: {comPort || "—"}</span>
-        <span className="text-white/20">|</span>
-        <span>Device: {device?.model?.split(" ")[0] || "none"}</span>
-        <span className="text-white/20">|</span>
+        <span className="hidden sm:inline text-white/20">|</span>
+        <span className="hidden sm:inline">Port: {comPort || "—"}</span>
+        <span className="hidden md:inline text-white/20">|</span>
+        <span className="hidden md:inline">Device: {device?.model?.split(" ")[0] || "none"}</span>
+        <span className="hidden sm:inline text-white/20">|</span>
         <span
           data-testid="cli-bridge-status"
           className={`flex items-center gap-2 ${cliStatus === "connected" ? "text-[#00FF41]" : ""}`}
@@ -63,7 +63,7 @@ export const StatusBar = () => {
           {cliText}
         </span>
       </div>
-      <div className="flex items-center gap-4">
+      <div className="hidden lg:flex items-center gap-4 whitespace-nowrap">
         <span>Logs: {logs.length}</span>
         <span className="text-white/20">|</span>
         <span>CPU 4%</span>

@@ -19,6 +19,10 @@ mod heimdall;
 mod edl;
 mod qualcomm;
 mod apple;
+mod swclone;
+mod identify;
+mod mtp;
+mod official;
 
 use clap::{Parser, Subcommand};
 use colored::Colorize;
@@ -91,10 +95,31 @@ enum Command {
     /// Phone must be in Download Mode (Vol-Down + Bixby + Power, then Vol-Up).
     /// Works on Galaxy S9 / Note 9 / older A-series. Newer Knox 3.x models may reject writes.
     SamsungFactoryReset,
+    /// Smart Switch transport: FUS firmware lookup/download and ADB backup.
+    /// Remaining args are forwarded to backend/swclone.py
+    /// (devices, inform, fetch, decrypt, pull).
+    SamsungSwclone {
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
+    /// Read brand, model, and OS version from phones adb or libimobiledevice can see.
+    Phones,
     /// Detect Qualcomm EDL / 9008 devices currently attached.
     EdlDetect,
     /// Detect Android MTP (file transfer) devices currently attached.
     MtpDetect,
+    /// List folders and files on the connected MTP phone.
+    MtpList {
+        /// Folder inside the phone, for example DCIM. Omit to list the top level.
+        path: Option<String>,
+    },
+    /// Copy DCIM, Download, or a named folder off the connected MTP phone.
+    MtpPull {
+        /// Folder or file inside the phone. Defaults to DCIM or the first folder.
+        path: Option<String>,
+        /// Destination directory. Defaults to %USERPROFILE%\aether-mtp.
+        dest: Option<String>,
+    },
     /// Run a local WebSocket bridge so the Aether web dashboard can talk to attached devices.
     Serve {
         /// Bind address.
@@ -106,6 +131,15 @@ enum Command {
     Setup,
     /// Print the version of the bundled / detected mtkclient (Python tool).
     Doctor,
+    /// Run one documented adb, fastboot, heimdall, or libimobiledevice command.
+    /// The command must be in the official set. Repair actions stay on their own subcommands.
+    Official {
+        /// adb, fastboot, heimdall, or apple
+        tool: String,
+        /// Official arguments, for example: devices -l
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
+        args: Vec<String>,
+    },
 }
 
 fn print_banner() {
@@ -155,8 +189,44 @@ async fn main() -> anyhow::Result<()> {
         Command::SamsungDetect => exploits::samsung::detect().await?,
         Command::SamsungReadPit => exploits::samsung::read_pit().await?,
         Command::SamsungFactoryReset => exploits::samsung::factory_reset().await?,
+        Command::SamsungSwclone { args } => {
+            let args = if args.is_empty() {
+                vec!["devices".to_string()]
+            } else {
+                args
+            };
+            let (code, output) = swclone::run_collect(&args).await?;
+            print!("{output}");
+            if code != 0 {
+                anyhow::bail!("swclone exited {code}");
+            }
+        }
+        Command::Phones => identify::print_phones().await?,
         Command::EdlDetect => usb::report_edl_detection()?,
         Command::MtpDetect => usb::report_mtp_detection()?,
+        Command::MtpList { path } => {
+            let mut args = vec!["list".to_string()];
+            if let Some(path) = path {
+                args.push(path);
+            }
+            let (code, output) = mtp::run_collect(&args).await?;
+            print!("{output}");
+            if code != 0 {
+                anyhow::bail!("mtp list exited {code}");
+            }
+        }
+        Command::MtpPull { path, dest } => {
+            let mut args = vec!["pull".to_string()];
+            args.push(path.unwrap_or_default());
+            if let Some(dest) = dest {
+                args.push(dest);
+            }
+            let (code, output) = mtp::run_collect(&args).await?;
+            print!("{output}");
+            if code != 0 {
+                anyhow::bail!("mtp pull exited {code}");
+            }
+        }
         Command::Serve { addr } => bridge::serve(&addr).await?,
         Command::Setup => {
             println!("  {} installing mtkclient via pip (requires Python 3.8+) ...", "→".bright_green());
@@ -186,6 +256,24 @@ async fn main() -> anyhow::Result<()> {
             match apple::check_apple() {
                 Ok(v) => println!("  {} apple: {}", "✓".bright_green(), v.bright_white()),
                 Err(e) => println!("  {} apple: {}", "✗".bright_red(), e),
+            }
+            for (label, names) in [
+                ("adb", official::adb_names()),
+                ("fastboot", official::fastboot_names()),
+            ] {
+                let status = official::tool_status(label, names);
+                if status.contains("not on PATH") {
+                    println!("  {} {}", "✗".bright_red(), status);
+                } else {
+                    println!("  {} {}", "✓".bright_green(), status.bright_white());
+                }
+            }
+        }
+        Command::Official { tool, args } => {
+            let (code, output) = official::run_collect(&tool, &args).await?;
+            print!("{output}");
+            if code != 0 {
+                anyhow::bail!("{tool} exited {code}");
             }
         }
     }

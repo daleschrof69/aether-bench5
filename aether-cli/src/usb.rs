@@ -119,6 +119,149 @@ pub struct MtpDevice {
     pub product: String,
     pub manufacturer: String,
     pub mode: &'static str,
+    #[serde(default)]
+    pub serial: String,
+}
+
+#[derive(Debug, Clone)]
+struct WindowsMtpHint {
+    vid: String,
+    pid: String,
+    name: String,
+    class_name: String,
+    serial: Option<String>,
+    mtp: bool,
+}
+
+fn blank(value: &str) -> bool {
+    let trimmed = value.trim();
+    trimmed.is_empty() || trimmed == "—" || trimmed == "-"
+}
+
+/// Fill libusb rows that have no string descriptors, and add phones that
+/// Windows Portable Devices sees when libusb cannot open the interface.
+fn apply_windows_mtp_hints(found: Vec<MtpDevice>, hints: &[WindowsMtpHint]) -> Vec<MtpDevice> {
+    let mut out = found;
+    for hint in hints.iter().filter(|hint| hint.mtp) {
+        if let Some(row) = out.iter_mut().find(|row| row.vid == hint.vid && row.pid == hint.pid) {
+            if blank(&row.product) && hint.class_name == "WPD" {
+                row.product = hint.name.clone();
+            }
+            if blank(&row.manufacturer) {
+                row.manufacturer = manufacturer_for_vid(&hint.vid).unwrap_or("Android").to_string();
+            }
+            if blank(&row.serial) {
+                if let Some(serial) = hints.iter().find_map(|other| {
+                    (other.vid == hint.vid && other.pid == hint.pid)
+                        .then_some(other.serial.clone())
+                        .flatten()
+                }) {
+                    row.serial = serial;
+                }
+            }
+        } else if hint.class_name == "WPD" {
+            let serial = hints
+                .iter()
+                .find_map(|other| {
+                    (other.vid == hint.vid && other.pid == hint.pid)
+                        .then_some(other.serial.clone())
+                        .flatten()
+                })
+                .unwrap_or_default();
+            out.push(MtpDevice {
+                bus: 0,
+                addr: 0,
+                vid: hint.vid.clone(),
+                pid: hint.pid.clone(),
+                product: hint.name.clone(),
+                manufacturer: manufacturer_for_vid(&hint.vid).unwrap_or("Phone").to_string(),
+                mode: "Windows MTP",
+                serial,
+            });
+        }
+    }
+    out
+}
+
+fn manufacturer_for_vid(vid: &str) -> Option<&'static str> {
+    match vid {
+        "04e8" => Some("Samsung"),
+        "05ac" => Some("Apple"),
+        "18d1" => Some("Google"),
+        "2717" | "2b4c" => Some("Xiaomi"),
+        "22b8" => Some("Motorola"),
+        "12d1" => Some("Huawei"),
+        "22d9" => Some("OPPO"),
+        "2d95" => Some("Vivo"),
+        "0bb4" | "2a70" => Some("OnePlus"),
+        "2a45" => Some("Meizu"),
+        _ => None,
+    }
+}
+
+#[cfg(windows)]
+fn windows_mtp_hints() -> Vec<WindowsMtpHint> {
+    let script = r#"
+$ErrorActionPreference = 'SilentlyContinue'
+$rows = @()
+Get-PnpDevice -PresentOnly | Where-Object { $_.InstanceId -match 'VID_[0-9A-F]{4}&PID_[0-9A-F]{4}' } | ForEach-Object {
+  if ($_.InstanceId -match 'VID_([0-9A-F]{4})&PID_([0-9A-F]{4})') {
+    $vendor = $Matches[1].ToLower()
+    $productId = $Matches[2].ToLower()
+    $serial = $null
+    if ($_.InstanceId -match '^USB\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}\\([^\\&]+)$') { $serial = $Matches[1] }
+    $mtp = ($_.Class -eq 'WPD') -or ($_.InstanceId -match 'MS_COMP_MTP|SAMSUNG_ANDROID')
+    if ($mtp -or $serial) {
+      $rows += [pscustomobject]@{ vid = $vendor; pid = $productId; name = $_.FriendlyName; class = $_.Class; serial = $serial; mtp = [bool]$mtp }
+    }
+  }
+}
+if ($rows.Count -eq 0) { '[]' } else { $rows | ConvertTo-Json -Compress }
+"#;
+    let output = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-Command", script])
+        .output();
+    let Ok(output) = output else {
+        return Vec::new();
+    };
+    if !output.status.success() {
+        return Vec::new();
+    }
+    parse_windows_mtp_json(&String::from_utf8_lossy(&output.stdout))
+}
+
+#[cfg(not(windows))]
+fn windows_mtp_hints() -> Vec<WindowsMtpHint> {
+    Vec::new()
+}
+
+fn parse_windows_mtp_json(text: &str) -> Vec<WindowsMtpHint> {
+    let trimmed = text.trim();
+    let text = trimmed
+        .find(['{', '['])
+        .map(|start| &trimmed[start..])
+        .unwrap_or(trimmed);
+    if text.is_empty() || text == "[]" {
+        return Vec::new();
+    }
+    let value: serde_json::Value = serde_json::from_str(text).unwrap_or(serde_json::Value::Null);
+    let rows = match value {
+        serde_json::Value::Array(rows) => rows,
+        serde_json::Value::Object(_) => vec![value],
+        _ => return Vec::new(),
+    };
+    rows.into_iter()
+        .filter_map(|row| {
+            Some(WindowsMtpHint {
+                vid: row.get("vid")?.as_str()?.to_string(),
+                pid: row.get("pid")?.as_str()?.to_string(),
+                name: row.get("name").and_then(|v| v.as_str()).unwrap_or("MTP device").to_string(),
+                class_name: row.get("class").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                serial: row.get("serial").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                mtp: row.get("mtp").and_then(|v| v.as_bool()).unwrap_or(false),
+            })
+        })
+        .collect()
 }
 
 /// Scan currently attached USB devices and return every MTP target.
@@ -147,9 +290,10 @@ pub fn detect_mtp_devices() -> Vec<MtpDevice> {
             product,
             manufacturer,
             mode,
+            serial: String::new(),
         });
     }
-    out
+    apply_windows_mtp_hints(out, &windows_mtp_hints())
 }
 
 /// Pretty-print MTP detection results to the terminal.
@@ -182,6 +326,9 @@ pub fn report_mtp_detection() -> Result<()> {
             dev.manufacturer.dimmed(),
             dev.product
         );
+        if !dev.serial.is_empty() {
+            println!("      serial {}", dev.serial);
+        }
     }
     Ok(())
 }
@@ -272,16 +419,42 @@ pub fn report_edl_detection() -> Result<()> {
     Ok(())
 }
 
+fn phone_vendor(vid: u16) -> bool {
+    matches!(
+        vid,
+        0x04e8 | 0x18d1 | 0x05ac | 0x2717 | 0x2b4c | 0x22b8 | 0x1004 | 0x12d1
+            | 0x0bb4 | 0x2a70 | 0x22d9 | 0x2d95 | 0x0e8d | 0x05c6 | 0x1782
+            | 0x0fce | 0x0b05 | 0x19d2 | 0x2a45
+    )
+}
+
 /// JSON representation of the current USB device list — used by the bridge.
+/// Manufacturer and product strings are read only for phone vendors. Opening
+/// every hub and keyboard on Windows stalls the scan.
 pub fn devices_as_json() -> Result<Vec<Value>> {
     let mut out = Vec::new();
     for (d, desc) in enumerate() {
+        let readable = classify(&desc).is_some() || phone_vendor(desc.vendor_id());
+        let (manufacturer, product) = if readable {
+            let handle = d.open().ok();
+            let manufacturer = handle
+                .as_ref()
+                .and_then(|h| h.read_manufacturer_string_ascii(&desc).ok());
+            let product = handle
+                .as_ref()
+                .and_then(|h| h.read_product_string_ascii(&desc).ok());
+            (manufacturer, product)
+        } else {
+            (None, None)
+        };
         out.push(json!({
             "bus": d.bus_number(),
             "addr": d.address(),
             "vid": format!("{:04x}", desc.vendor_id()),
             "pid": format!("{:04x}", desc.product_id()),
             "repair_mode": classify(&desc),
+            "manufacturer": manufacturer,
+            "product": product,
         }));
     }
     Ok(out)
@@ -355,4 +528,31 @@ fn collect_keys() -> std::collections::HashSet<String> {
         ));
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn windows_wpd_name_fills_a_blank_libusb_row() {
+        let hints = parse_windows_mtp_json(
+            r#"[{"vid":"04e8","pid":"6860","name":"Galaxy S24 Ultra","class":"WPD","serial":null,"mtp":true},{"vid":"04e8","pid":"6860","name":"SAMSUNG Mobile USB Composite Device","class":"USB","serial":"R3CX802V2VY","mtp":false}]"#,
+        );
+        let found = vec![MtpDevice {
+            bus: 1,
+            addr: 61,
+            vid: "04e8".into(),
+            pid: "6860".into(),
+            product: "—".into(),
+            manufacturer: "—".into(),
+            mode: "Samsung MTP",
+            serial: String::new(),
+        }];
+        let merged = apply_windows_mtp_hints(found, &hints);
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].product, "Galaxy S24 Ultra");
+        assert_eq!(merged[0].manufacturer, "Samsung");
+        assert_eq!(merged[0].serial, "R3CX802V2VY");
+    }
 }

@@ -1,7 +1,7 @@
 const samsungKg = `# Samsung KG Suspend — Carrier Lock Bypass
 
 > **Audience:** Licensed Samsung repair technicians.
-> **Cost:** 15 credits per device.
+> **Cost:** Free.
 > **Platforms supported:** Samsung Exynos 2200 → 2400, Snapdragon 8 Gen 1 → 3, Knox 3.7 → 3.9.
 
 ## Overview
@@ -17,7 +17,7 @@ Knox Guard (KG) is Samsung's enterprise device-locking framework. When a leased 
 1. **USB cable** — original Samsung or rated 1A+ data cable.
 2. **Battery** — minimum 30% charge.
 3. **Aether CLI / Suite** — version 4.6 or later.
-4. **Account credits** — 15 available credits.
+4. **Account** — operations are free. No credit balance is required.
 5. **Driver** — Samsung USB driver v1.7.x installed on host.
 
 ## Procedure
@@ -108,7 +108,7 @@ Always perform an \`adb backup\` of the customer's data **before** the operation
 const qcImei = `# Qualcomm EDL — IMEI Repair
 
 > **Audience:** Trained network-equipment technicians.
-> **Cost:** 5 credits per device per IMEI written.
+> **Cost:** Free.
 > **Platforms:** Snapdragon 660 → 8 Gen 3 (SDM660 → SM8650).
 > **Protocols:** Sahara / Firehose v3.0 · QFIL · 9008.
 
@@ -165,7 +165,7 @@ export const DOCS = [
     summary: "Carrier-lock suspend procedure for Knox 3.7 → 3.9.",
     platform: "Samsung",
     minutes: 7,
-    cost: "15 credits",
+    cost: "Free",
     body: samsungKg,
   },
   {
@@ -183,7 +183,7 @@ export const DOCS = [
     summary: "Restore the modem NV partition over Sahara/Firehose 9008.",
     platform: "Qualcomm",
     minutes: 8,
-    cost: "5 credits",
+    cost: "Free",
     body: qcImei,
   },
 ];

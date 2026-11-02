@@ -95,7 +95,7 @@ export const Console = ({ height = "h-64", limit }) => {
           </div>
         )}
         {visible.map((log) => (
-          <div key={log.id} className="flex gap-3 group hover:bg-white/[0.02]">
+          <div key={log.id} className="flex items-start gap-3 group hover:bg-white/[0.02]">
             <span className="text-white/30 select-none">[{log.ts}]</span>
             <span className={`flex items-center gap-1 ${LEVEL_COLORS[log.level]} w-20 flex-shrink-0`}>
               <span className={`inline-block w-1 h-1 ${LEVEL_BG[log.level]}`} />

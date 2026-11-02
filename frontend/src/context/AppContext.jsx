@@ -1,8 +1,31 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
+import { useAuth } from "./AuthContext";
 import { useCliBridge } from "../hooks/useCliBridge";
 import { useWebUsb } from "../hooks/useWebUsb";
+import { quoteOp } from "../lib/opCosts";
 import { SEARCH_HINTS, platformFromDevice } from "../lib/usbSignatures";
+
+const WALLET_KEY = "aether.bench.credits";
+
+function readWallet() {
+  try {
+    const raw = window.localStorage.getItem(WALLET_KEY);
+    if (raw == null) return 100;
+    const amount = Number(raw);
+    return Number.isFinite(amount) && amount >= 0 ? Math.floor(amount) : 100;
+  } catch {
+    return 100;
+  }
+}
+
+function writeWallet(amount) {
+  try {
+    window.localStorage.setItem(WALLET_KEY, String(amount));
+  } catch {
+    /* Storage can be blocked in private windows. The on-screen balance still updates. */
+  }
+}
 
 const AppContext = createContext(null);
 export const useApp = () => useContext(AppContext);
@@ -34,6 +57,7 @@ const BRIDGE_METHODS = {
   samsung_detect:         { method: "samsung.detect" },
   samsung_read_pit:       { method: "samsung.read_pit" },
   samsung_factory_reset:  { method: "samsung.factory_reset" },
+  samsung_swclone:        { method: "samsung.swclone", params: { args: ["devices"] } },
   // Apple (libimobiledevice). Recovery query, lockdown info, diagnostics, and
   // an Apple-signed erase restore. None of these skip Activation Lock.
   apple_info:             { method: "apple.read_info" },
@@ -44,10 +68,27 @@ const BRIDGE_METHODS = {
   apple_restore:          { method: "apple.restore_latest" },
   hello_screen_bypass:    { method: "apple.pwn_dfu" },
   // MTP
-  mtp_detect:             { method: "mtp.detect" },
+  mtp_detect:             { method: "mtp.report" },
   mtp_list:               { method: "mtp.list" },
   mtp_pull:               { method: "mtp.pull" },
   mtp_info:               { method: "mtp.info" },
+  // Documented vendor commands. Existing repair actions stay on the keys above.
+  official_adb_devices:    { method: "official.run", params: { tool: "adb", args: ["devices", "-l"] } },
+  official_adb_state:      { method: "official.run", params: { tool: "adb", args: ["get-state"] } },
+  official_adb_reboot:     { method: "official.run", params: { tool: "adb", args: ["reboot"] } },
+  official_adb_recovery:   { method: "official.run", params: { tool: "adb", args: ["reboot", "recovery"] } },
+  official_adb_bootloader: { method: "official.run", params: { tool: "adb", args: ["reboot", "bootloader"] } },
+  official_adb_download:   { method: "official.run", params: { tool: "adb", args: ["reboot", "download"] } },
+  official_fastboot_devices: { method: "official.run", params: { tool: "fastboot", args: ["devices"] } },
+  official_fastboot_getvar:  { method: "official.run", params: { tool: "fastboot", args: ["getvar", "all"] } },
+  official_heimdall_version: { method: "official.run", params: { tool: "heimdall", args: ["version"] } },
+  official_heimdall_close:   { method: "official.run", params: { tool: "heimdall", args: ["close-pc-screen"] } },
+  official_heimdall_pit:     { method: "official.run", params: { tool: "heimdall", args: ["download-pit"] } },
+  official_apple_id:         { method: "official.run", params: { tool: "apple", args: ["id"] } },
+  official_apple_info:       { method: "official.run", params: { tool: "apple", args: ["info"] } },
+  official_apple_diagnostics:{ method: "official.run", params: { tool: "apple", args: ["diagnostics"] } },
+  official_apple_recovery:   { method: "official.run", params: { tool: "apple", args: ["recovery"] } },
+  official_apple_pair:       { method: "official.run", params: { tool: "apple", args: ["pair", "validate"] } },
 };
 
 const formatTime = (d = new Date()) =>
@@ -64,10 +105,17 @@ export const AppProvider = ({ children }) => {
   const [progress, setProgress] = useState(0);
   const [autoConnect, setAutoConnect] = useState(true);
   const [soundEnabled, setSoundEnabled] = useState(false);
-  const [credits, setCredits] = useState(100);
+  const [credits, setCredits] = useState(readWallet);
+  const { user, http, noteCredits } = useAuth();
   const [setupOpen, setSetupOpen] = useState(false);
   const [imeiModalOpen, setImeiModalOpen] = useState(false);
   const timersRef = useRef([]);
+  const chargingRef = useRef(false);
+  useEffect(() => {
+    if (user && typeof user === "object" && typeof user.credits === "number") {
+      setCredits(user.credits);
+    }
+  }, [user]);
   const cliBridge = useCliBridge();
   const webusb = useWebUsb();
 
@@ -114,48 +162,126 @@ export const AppProvider = ({ children }) => {
     }
 
     try {
-      const res = await cliBridge.call("devices", {});
+      const [res, identified] = await Promise.all([
+        cliBridge.call("devices", {}),
+        cliBridge.call("phones.identify", {}).catch((err) => {
+          pushLog("WARN", `Phone identify unavailable: ${err?.message || err}`);
+          return { phones: [] };
+        }),
+      ]);
       const list = Array.isArray(res?.devices) ? res.devices : [];
       const classified = list.map((raw) => ({ raw, ...platformFromDevice(raw) }));
+      const phones = Array.isArray(identified?.phones) ? identified.phones : [];
+      if (identified?.note) pushLog("WARN", identified.note);
+      phones.forEach((phone) => {
+        const brand = phone.brand || "Phone";
+        const model = phone.model || "unknown model";
+        const os = phone.os || "unknown OS";
+        const kind = phone.kind || "phone";
+        pushLog("INFO", `${brand} ${model} · ${kind} · ${os} · ${phone.state || "unknown"} · ${phone.serial || "—"}`);
+        if (phone.note) pushLog("WARN", phone.note);
+      });
+      const phoneMatches = (phone) => {
+        if (!want) return true;
+        const blob = `${phone.brand || ""} ${phone.platform || ""} ${phone.model || ""}`.toLowerCase();
+        return blob.includes(String(want).toLowerCase());
+      };
       const pool = want ? classified.filter((d) => d.platform === want) : classified;
       const target = pool.find((d) => d.repair) || pool[0];
-      if (!target) {
+      const phonePool = phones.filter(phoneMatches);
+      const phone = phonePool.find((p) => p.state === "device" || p.state === "trusted")
+        || phonePool[0]
+        || (!target && phones.length === 1 ? phones[0] : null);
+      if (!phone && !target) {
         pushLog("WARN", want
-          ? `No ${want} device found. Put the phone in the matching repair mode and retry.`
-          : "No USB devices found. Plug a phone in BROM / EDL / DFU / Download mode and retry.");
+          ? `No ${want} device found. Plug the phone in and accept USB debugging, or put it in Download / BROM / EDL mode.`
+          : "No phone found. Plug it in and accept USB debugging, or put it in a repair mode.");
         setStatus("idle");
         toast.warning(want ? `No ${want} device` : "No device detected");
         return;
       }
-      const dev = {
-        model: target.mode || `USB ${target.raw.vid}:${target.raw.pid}`,
-        brand: target.brand || "USB device",
-        platform: target.platform,
-        imei: "—", imei_masked: "—", imei2: "—", imei2_masked: "—",
-        serial: "—",
-        bootloader: target.mode || "Interface mode",
-        cpuId: "—", storage: "—", ram: "—", region: "—",
-        vid: target.raw.vid, pid: target.raw.pid,
-        android: "—", patch: "—",
-        repair: !!target.repair,
-        source: "bridge",
-        detectedAt: new Date(),
-      };
+      const dev = phone
+        ? {
+            model: phone.model || target?.mode || "Unknown model",
+            brand: phone.brand || target?.brand || "Phone",
+            platform: phone.platform || target?.platform || "Android",
+            kind: phone.kind || "phone",
+            imei: "—", imei_masked: "—", imei2: "—", imei2_masked: "—",
+            serial: phone.serial || "—",
+            bootloader: phone.build || target?.mode || "—",
+            cpuId: phone.cpu || "—", storage: "—", ram: "—",
+            region: phone.region || "—",
+            vid: target?.raw?.vid, pid: target?.raw?.pid,
+            android: phone.android || "—",
+            os: phone.os || "—",
+            patch: phone.security_patch || "—",
+            repair: !!target?.repair,
+            source: phone.source || "bridge",
+            detectedAt: new Date(),
+          }
+        : {
+            model: target.raw?.product || target.mode || `USB ${target.raw.vid}:${target.raw.pid}`,
+            brand: target.raw?.manufacturer || target.brand || "USB device",
+            platform: target.platform,
+            kind: target.repair ? "repair" : "usb",
+            imei: "—", imei_masked: "—", imei2: "—", imei2_masked: "—",
+            serial: "—",
+            bootloader: target.mode || "Interface mode",
+            cpuId: "—", storage: "—", ram: "—", region: "—",
+            vid: target.raw.vid, pid: target.raw.pid,
+            android: "—", os: "—", patch: "—",
+            repair: !!target.repair,
+            source: "bridge",
+            detectedAt: new Date(),
+          };
       setDevice(dev);
-      setComPort(`bus ${target.raw.bus} · addr ${target.raw.addr}`);
+      setComPort(phone?.transport
+        ? phone.transport
+        : target ? `bus ${target.raw.bus} · addr ${target.raw.addr}` : "—");
       setStatus("connected");
-      pushLog("SUCCESS", `Device detected: ${dev.brand} · ${dev.model} (${dev.vid}:${dev.pid})`);
-      if (!target.repair) {
-        pushLog("WARN", "Device is not in a known repair mode. Enter BROM / EDL / DFU / Download mode for operations.");
-      } else {
-        pushLog("INFO", `${dev.platform} operations are enabled for this device.`);
+      pushLog("SUCCESS", `Device detected: ${dev.brand} ${dev.model} · ${dev.os && dev.os !== "—" ? dev.os : dev.platform}`);
+      if (phone && phone.state !== "device" && phone.state !== "trusted") {
+        pushLog("WARN", "The phone is connected, but Aether could not read its full identity yet.");
+      } else if (!phone && target && !target.repair) {
+        pushLog("WARN", "USB name only. Enable USB debugging to read the model and OS version.");
+      } else if (target?.repair) {
+        pushLog("INFO", `${dev.platform} repair mode is available for this device.`);
       }
-      toast.success(`Connected · ${dev.model}`, { description: `${dev.platform} · ${dev.vid}:${dev.pid}` });
+      toast.success(`Connected · ${dev.model}`, { description: `${dev.brand} · ${dev.os && dev.os !== "—" ? dev.os : dev.platform}` });
     } catch (e) {
       pushLog("ERROR", `Bridge device scan failed: ${e?.message || e}`);
       setStatus("idle");
     }
   }, [cliBridge, pushLog, clearTimers]);
+
+  const connectMtp = useCallback((raw) => {
+    if (!raw) return;
+    const model = raw.product && raw.product !== "—" ? raw.product : "MTP device";
+    const brand = raw.manufacturer && raw.manufacturer !== "—" ? raw.manufacturer : "Android";
+    const dev = {
+      model,
+      brand,
+      platform: "MTP",
+      kind: "phone",
+      imei: "—", imei_masked: "—", imei2: "—", imei2_masked: "—",
+      serial: raw.serial || "—",
+      bootloader: raw.mode || "MTP",
+      cpuId: "—", storage: "—", ram: "—", region: "—",
+      vid: raw.vid, pid: raw.pid,
+      android: "—",
+      os: "MTP",
+      patch: "—",
+      repair: false,
+      source: "mtp",
+      detectedAt: new Date(),
+    };
+    clearTimers();
+    setDevice(dev);
+    setComPort(raw.serial || `bus ${raw.bus} · addr ${raw.addr}`);
+    setStatus("connected");
+    pushLog("SUCCESS", `MTP connected: ${brand} ${model}${raw.serial ? ` · ${raw.serial}` : ""}`);
+    toast.success(`MTP · ${model}`, { description: `${brand} · ${raw.vid}:${raw.pid}` });
+  }, [clearTimers, pushLog]);
 
   const disconnect = useCallback(() => {
     clearTimers();
@@ -228,9 +354,40 @@ export const AppProvider = ({ children }) => {
     }
   }, [webusb, pushLog, clearTimers]);
 
+  const applyBalance = useCallback((amount) => {
+    setCredits(amount);
+    if (user && typeof user === "object") noteCredits(amount);
+    else writeWallet(amount);
+  }, [user, noteCredits]);
+
+  const refundCharge = useCallback(async (charge) => {
+    if (!charge || charge.cost <= 0 || charge.refunded) return;
+    charge.refunded = true;
+    if (charge.where === "server") {
+      try {
+        const { data } = await http.post("/credits/refund", { op_id: charge.opId });
+        applyBalance(data.credits);
+        pushLog("INFO", `Returned ${charge.cost} credits because ${charge.label} did not complete.`);
+      } catch (e) {
+        pushLog("ERROR", e?.response?.data?.detail || "Credit refund failed. The charge is still on the account.");
+      }
+      return;
+    }
+    const next = readWallet() + charge.cost;
+    writeWallet(next);
+    setCredits(next);
+    pushLog("INFO", `Returned ${charge.cost} credits because ${charge.label} did not complete.`);
+  }, [http, applyBalance, pushLog]);
+
   const runAction = useCallback(
-    (actionKey, label, params = {}) => {
-      if (status !== "connected" || activeAction) return;
+    (actionKey, label, params = {}, costLabel) => {
+      const allowDisconnected = actionKey.startsWith("official_");
+      if (activeAction || chargingRef.current) return;
+      if (!allowDisconnected && status !== "connected") {
+        pushLog("ERROR", `Connect a device before running ${label}. No credits were charged.`);
+        toast.error("Connect a device first", { description: `${label} was not charged.` });
+        return;
+      }
 
       const bridgeMap = BRIDGE_METHODS[actionKey];
       const bridgeLive =
@@ -247,49 +404,107 @@ export const AppProvider = ({ children }) => {
       // Bridge live but this operation needs tooling the CLI doesn't expose yet.
       if (!bridgeMap) {
         pushLog("WARN", `"${label}" is not yet wired to a local CLI operation — skipping.`);
-        pushLog("INFO", "This operation requires an additional loader/module in aether-cli.");
-        toast.warning(`${label} · unavailable`, { description: "Not yet supported by the local CLI." });
+        pushLog("INFO", "This operation requires an additional loader/module in aether-cli. No credits were charged.");
+        toast.warning(`${label} · unavailable`, { description: "Not yet supported by the local CLI. No credits were charged." });
         return;
       }
 
-      // LIVE execution — stream real mtkclient / heimdall output into the console.
-      setActiveAction(label);
-      setStatus("working");
-      setProgress(0);
-      pushLog("INFO", `>>> EXECUTING (LIVE): ${label}`);
-      pushLog("INFO", `aether-cli → ${bridgeMap.method}`);
+      let cost = 0;
+      try {
+        cost = quoteOp(actionKey, costLabel);
+      } catch (e) {
+        pushLog("ERROR", e.message);
+        toast.error(e.message);
+        return;
+      }
 
-      cliBridge
-        .runJob(bridgeMap.method, { ...(bridgeMap.params || {}), ...params }, (ev) => {
-          if (ev.stream === "stdout" && ev.line) {
-            pushLog("INFO", ev.line);
-          } else if (ev.stream === "stderr" && ev.line) {
-            pushLog("WARN", ev.line);
-          } else if (ev.stream === "done") {
-            if (ev.exit_code === 0) {
-              pushLog("SUCCESS", `${label} completed (exit 0).`);
-              toast.success(`${label} · done`, { description: "Operation completed successfully." });
-            } else {
-              pushLog("ERROR", `${label} failed (exit ${ev.exit_code}).`);
-              toast.error(`${label} · failed`, { description: `Exit code ${ev.exit_code}` });
+      const returnStatus = status === "connected" ? "connected" : "idle";
+      const startJob = (charge) => {
+        chargingRef.current = false;
+        setActiveAction(label);
+        setStatus("working");
+        setProgress(0);
+        pushLog("INFO", `>>> EXECUTING (LIVE): ${label}`);
+        pushLog("INFO", `aether-cli → ${bridgeMap.method}`);
+        if (charge?.cost > 0) {
+          pushLog("INFO", `Charged ${charge.cost} credits for ${label}.`);
+        }
+
+        cliBridge
+          .runJob(bridgeMap.method, { ...(bridgeMap.params || {}), ...params }, (ev) => {
+            if (ev.stream === "stdout" && ev.line) {
+              pushLog("INFO", ev.line);
+            } else if (ev.stream === "stderr" && ev.line) {
+              pushLog("WARN", ev.line);
+            } else if (ev.stream === "done") {
+              if (ev.exit_code === 0) {
+                pushLog("SUCCESS", `${label} completed (exit 0).`);
+                toast.success(`${label} · done`, { description: "Operation completed successfully." });
+              } else {
+                pushLog("ERROR", `${label} failed (exit ${ev.exit_code}).`);
+                toast.error(`${label} · failed`, { description: `Exit code ${ev.exit_code}` });
+                refundCharge(charge);
+              }
+              const finishT = setTimeout(() => {
+                setActiveAction(null);
+                setStatus(returnStatus);
+                setProgress(0);
+              }, 600);
+              timersRef.current.push(finishT);
             }
-            const finishT = setTimeout(() => {
-              setActiveAction(null);
-              setStatus("connected");
-              setProgress(0);
-            }, 600);
-            timersRef.current.push(finishT);
-          }
-        })
-        .catch((e) => {
-          pushLog("ERROR", `bridge error: ${e?.message || e}`);
-          toast.error("Bridge error", { description: e?.message || String(e) });
-          setActiveAction(null);
-          setStatus("connected");
-          setProgress(0);
-        });
+          })
+          .catch((e) => {
+            const message = e?.message || String(e);
+            const hint = /unknown method/i.test(message)
+              ? `${message}. Quit aether-cli and start it again so this button reaches the new build.`
+              : message;
+            pushLog("ERROR", hint);
+            toast.error(hint);
+            refundCharge(charge);
+            setActiveAction(null);
+            setStatus(returnStatus);
+            setProgress(0);
+          });
+      };
+
+      if (cost === 0) {
+        startJob(null);
+        return;
+      }
+
+      const opId = (window.crypto?.randomUUID?.() || `op_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+      if (user && typeof user === "object") {
+        chargingRef.current = true;
+        http.post("/credits/spend", { action_key: actionKey, op_id: opId, cost })
+          .then(({ data }) => {
+            applyBalance(data.credits);
+            startJob({ where: "server", opId, cost: data.charged || cost, label, refunded: false });
+          })
+          .catch((e) => {
+            chargingRef.current = false;
+            const denied = e?.response?.status === 402;
+            const detail = e?.response?.data?.detail;
+            const message = denied
+              ? `Not enough credits. ${label} costs ${cost}.`
+              : (typeof detail === "string" ? detail : "Could not charge credits.");
+            pushLog("ERROR", message);
+            toast.error(message);
+          });
+        return;
+      }
+
+      const balance = readWallet();
+      if (balance < cost) {
+        pushLog("ERROR", `Not enough credits. ${label} costs ${cost}. Wallet has ${balance}.`);
+        toast.error("Not enough credits", { description: "Buy a credit pack, then run the operation again." });
+        return;
+      }
+      const next = balance - cost;
+      writeWallet(next);
+      setCredits(next);
+      startJob({ where: "local", opId, cost, label, refunded: false });
     },
-    [status, activeAction, pushLog, cliBridge]
+    [status, activeAction, pushLog, cliBridge, user, http, applyBalance, refundCharge]
   );
 
   // Boot sequence — honest init banner (no fake engine loading).
@@ -338,6 +553,7 @@ export const AppProvider = ({ children }) => {
     setAutoConnect,
     setSoundEnabled,
     startSearch,
+    connectMtp,
     disconnect,
     connectWebUsb,
     webusb,

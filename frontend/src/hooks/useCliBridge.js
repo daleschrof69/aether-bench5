@@ -27,6 +27,7 @@ export function useCliBridge() {
   const wsRef = useRef(null);
   const pendingRef = useRef(new Map());
   const jobSubsRef = useRef(new Map()); // job_id → onEvent callback
+  const earlyEventsRef = useRef(new Map()); // job_id → events that arrived before subscribe
   const reconnectRef = useRef(null);
 
   const url =
@@ -68,7 +69,10 @@ export function useCliBridge() {
       setStatus("connected");
       const id = ++rpcId;
       ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "hello", params: {} }));
-      pendingRef.current.set(id, (res) => setInfo(res));
+      pendingRef.current.set(id, {
+        resolve: (res) => setInfo(res),
+        reject: () => setInfo(null),
+      });
     };
 
     ws.onmessage = (msg) => {
@@ -77,9 +81,14 @@ export function useCliBridge() {
 
       // Response to a previous call() — resolve its promise.
       if (payload.id != null && pendingRef.current.has(payload.id)) {
-        const cb = pendingRef.current.get(payload.id);
+        const pending = pendingRef.current.get(payload.id);
         pendingRef.current.delete(payload.id);
-        cb(payload.result ?? payload.error);
+        if (payload.error) {
+          const message = payload.error.message || payload.error.error || "CLI error";
+          pending.reject(new Error(typeof message === "string" ? message : "CLI error"));
+        } else {
+          pending.resolve(payload.result);
+        }
         return;
       }
 
@@ -92,6 +101,11 @@ export function useCliBridge() {
           if (payload.params.stream === "done") {
             jobSubsRef.current.delete(payload.params.job_id);
           }
+        } else {
+          const key = payload.params.job_id;
+          const buf = earlyEventsRef.current.get(key) || [];
+          buf.push(payload.params);
+          earlyEventsRef.current.set(key, buf);
         }
       }
     };
@@ -102,8 +116,11 @@ export function useCliBridge() {
       setInfo(null);
       wsRef.current = null;
       // Reject all pending RPCs + job subs so callers don't hang.
-      for (const cb of pendingRef.current.values()) cb({ error: "CLI offline" });
+      for (const pending of pendingRef.current.values()) {
+        pending.reject(new Error("CLI offline"));
+      }
       pendingRef.current.clear();
+      earlyEventsRef.current.clear();
       for (const sub of jobSubsRef.current.values()) {
         sub({ stream: "done", exit_code: -1, line: "bridge disconnected" });
       }
@@ -120,14 +137,14 @@ export function useCliBridge() {
         return;
       }
       const id = ++rpcId;
-      pendingRef.current.set(id, resolve);
+      pendingRef.current.set(id, { resolve, reject });
       ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
       setTimeout(() => {
         if (pendingRef.current.has(id)) {
           pendingRef.current.delete(id);
           reject(new Error("CLI timeout"));
         }
-      }, 8000);
+      }, 20000);
     });
   }, []);
 
@@ -147,12 +164,16 @@ export function useCliBridge() {
             return;
           }
           const jobId = res.job_id;
-          jobSubsRef.current.set(jobId, (ev) => {
+          const deliver = (ev) => {
             try { onEvent?.(ev); } catch (err) { console.error("[cli-bridge] job onEvent callback threw:", err); }
             if (ev.stream === "done") {
               resolve(ev.exit_code);
             }
-          });
+          };
+          jobSubsRef.current.set(jobId, deliver);
+          const early = earlyEventsRef.current.get(jobId) || [];
+          earlyEventsRef.current.delete(jobId);
+          early.forEach(deliver);
         } catch (e) {
           reject(e);
         }

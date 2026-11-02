@@ -220,6 +220,18 @@ fn spawn_apple_restore_job(write: WsSink) -> String {
     spawn_job(Vec::new(), write, JobTool::AppleRestore)
 }
 
+fn spawn_swclone_job(args: Vec<String>, write: WsSink) -> String {
+    spawn_job(args, write, JobTool::Swclone)
+}
+
+fn spawn_mtp_job(args: Vec<String>, write: WsSink) -> String {
+    spawn_job(args, write, JobTool::Mtp)
+}
+
+fn spawn_official_job(args: Vec<String>, write: WsSink) -> String {
+    spawn_job(args, write, JobTool::Official)
+}
+
 #[derive(Clone)]
 enum JobTool {
     Mtkclient,
@@ -234,6 +246,9 @@ enum JobTool {
     AppleDiagnostics,
     AppleList,
     AppleRestore,
+    Swclone,
+    Mtp,
+    Official,
 }
 
 fn spawn_job(args: Vec<String>, write: WsSink, tool: JobTool) -> String {
@@ -257,6 +272,13 @@ fn spawn_job(args: Vec<String>, write: WsSink, tool: JobTool) -> String {
                 JobTool::AppleDiagnostics => apple::diagnostics_streaming(tx).await,
                 JobTool::AppleList => apple::list_devices_streaming(tx).await,
                 JobTool::AppleRestore => apple::restore_latest_streaming(tx).await,
+                JobTool::Swclone => crate::swclone::run_streaming(&refs, tx).await,
+                JobTool::Mtp => crate::mtp::run_streaming(&refs, tx).await,
+                JobTool::Official => {
+                    let (tool, rest) = refs.split_first().unwrap_or((&"", &[]));
+                    let rest_owned: Vec<String> = rest.iter().map(|s| (*s).to_string()).collect();
+                    crate::official::run_streaming(tool, &rest_owned, tx).await
+                }
             }
         });
         while let Some(sl) = rx.recv().await {
@@ -329,6 +351,14 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
                     "samsung.detect",
                     "samsung.read_pit",
                     "samsung.factory_reset",
+                    "samsung.swclone",
+                    "phones.identify",
+                    "mtp.detect",
+                    "mtp.report",
+                    "mtp.list",
+                    "mtp.pull",
+                    "mtp.info",
+                    "official.run",
                     "qualcomm.enter_edl",
                     "qualcomm.read_info",
                     "qualcomm.edl_auth_unlock",
@@ -347,6 +377,7 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
             }))
         }
         "devices" => Ok(json!({ "devices": crate::usb::devices_as_json().unwrap_or_default() })),
+        "phones.identify" => Ok(crate::identify::identify().await),
         // Explicit Qualcomm EDL / 9008 mode detection.
         "qualcomm.detect_edl" => {
             let devices = crate::usb::detect_edl_devices();
@@ -365,28 +396,44 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
                 "devices": devices,
             }))
         }
+        "mtp.report" => {
+            let job_id = spawn_mtp_job(vec!["detect".into()], write.clone());
+            Ok(json!({ "job_id": job_id, "status": "started" }))
+        }
         "mtp.list" => {
-            // Placeholder: real MTP file listing requires libmtp or similar.
-            // Returns an empty list until a full MTP stack is integrated.
-            Ok(json!({
-                "status": "ok",
-                "files": [],
-                "note": "MTP file listing requires libmtp integration (not yet bundled).",
-            }))
+            let mut args = vec!["list".into()];
+            if let Some(path) = params.get("path").and_then(|v| v.as_str()) {
+                if !path.is_empty() {
+                    args.push(path.to_string());
+                }
+            }
+            let job_id = spawn_mtp_job(args, write.clone());
+            Ok(json!({ "job_id": job_id, "status": "started" }))
         }
         "mtp.pull" => {
-            Ok(json!({
-                "status": "unavailable",
-                "message": "MTP pull requires libmtp integration.",
-            }))
+            let mut args = vec!["pull".into()];
+            let path = params.get("path").and_then(|v| v.as_str()).unwrap_or("");
+            args.push(path.to_string());
+            if let Some(dest) = params.get("dest").and_then(|v| v.as_str()) {
+                if !dest.is_empty() {
+                    args.push(dest.to_string());
+                }
+            }
+            let job_id = spawn_mtp_job(args, write.clone());
+            Ok(json!({ "job_id": job_id, "status": "started" }))
         }
         "mtp.info" => {
-            let devices = crate::usb::detect_mtp_devices();
-            Ok(json!({
-                "status": "ok",
-                "count": devices.len(),
-                "devices": devices,
-            }))
+            let job_id = spawn_mtp_job(vec!["info".into()], write.clone());
+            Ok(json!({ "job_id": job_id, "status": "started" }))
+        }
+        "official.run" => {
+            let tool = params.get("tool").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            let mut args = vec![tool];
+            if let Some(list) = params.get("args").and_then(|v| v.as_array()) {
+                args.extend(list.iter().filter_map(|v| v.as_str().map(|s| s.to_string())));
+            }
+            let job_id = spawn_official_job(args, write.clone());
+            Ok(json!({ "job_id": job_id, "status": "started" }))
         }
 
         // Cable-free EDL entry: reboot an ADB/fastboot device into Qualcomm 9008.
@@ -521,6 +568,22 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
         }
         "samsung.read_pit" => {
             let job_id = spawn_heimdall_job(vec!["print-pit".into()], write.clone());
+            Ok(json!({ "job_id": job_id, "status": "started" }))
+        }
+        "samsung.swclone" => {
+            let args = match params.get("args").and_then(|v| v.as_array()) {
+                Some(list) => list
+                    .iter()
+                    .filter_map(|v| v.as_str().map(|s| s.to_string()))
+                    .collect::<Vec<_>>(),
+                None => vec!["devices".into()],
+            };
+            let args = if args.is_empty() {
+                vec!["devices".into()]
+            } else {
+                args
+            };
+            let job_id = spawn_swclone_job(args, write.clone());
             Ok(json!({ "job_id": job_id, "status": "started" }))
         }
         "samsung.factory_reset" => {

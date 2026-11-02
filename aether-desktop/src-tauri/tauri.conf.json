@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "",
     "beforeBuildCommand": "",
-    "devUrl": "https://mtk-qualcomm-tool.emergent.host",
+    "devUrl": "http://localhost:3000",
     "frontendDist": "../public"
   },
   "app": {
@@ -15,7 +15,7 @@
       {
         "title": "Aether Repair Tool",
         "label": "main",
-        "url": "https://mtk-qualcomm-tool.emergent.host",
+        "url": "http://localhost:3000",
         "width": 1600,
         "height": 1000,
         "minWidth": 1100,
@@ -46,7 +46,7 @@
     "copyright": "© 2026 Aether Labs",
     "license": "Proprietary",
     "publisher": "Aether Labs",
-    "homepage": "https://mtk-qualcomm-tool.emergent.host",
+    "homepage": "http://localhost:3000",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

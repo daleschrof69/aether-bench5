@@ -76,7 +76,7 @@ export default function QualcommService() {
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-shrink-0">
         <div className="lg:col-span-8">
-          <ActionGrid platform="Qualcomm" actions={QC_ACTIONS} title="Qualcomm Operations" />
+          <ActionGrid platform="Qualcomm" actions={QC_ACTIONS} title="Qualcomm Operations" columns={2} />
         </div>
         <div className="lg:col-span-4">
           <DeviceInfoPanel />

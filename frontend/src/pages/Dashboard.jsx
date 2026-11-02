@@ -38,20 +38,9 @@ export default function Dashboard() {
   const successCount = logs.filter((l) => l.level === "SUCCESS").length;
 
   return (
-    <div data-testid="dashboard-page" className="h-full flex flex-col gap-3 p-4 overflow-y-auto">
-      {/* Demo Mode notice — clearly informs users the web UI is a preview */}
+    <div data-testid="dashboard-page" className="h-full min-h-0 flex flex-col gap-3 p-4 overflow-y-auto lg:overflow-hidden">
       <div className="flex-shrink-0">
         <DemoModeBanner />
-      </div>
-
-      {/* Native Windows download CTA — the user's primary conversion goal */}
-      <div className="flex-shrink-0">
-        <GetDesktopHeroCard />
-      </div>
-
-      {/* Founding Builder CTA */}
-      <div className="flex-shrink-0">
-        <FoundingBuilderBanner />
       </div>
 
       {/* Top stats row */}
@@ -71,31 +60,35 @@ export default function Dashboard() {
         <Stat label="Exploit DB" value="v6.2 / v3.0" icon={Database} />
       </div>
 
-      {/* Main grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-shrink-0">
-        <div className="lg:col-span-5">
+      {/* Device, identity, and actions share the remaining height and scroll inside their own cards. */}
+      <div className="grid grid-cols-1 lg:grid-cols-12 lg:grid-rows-[minmax(0,1fr)] gap-3 flex-none lg:flex-1 min-h-0 overflow-visible lg:overflow-hidden">
+        <div className="lg:col-span-5 h-auto min-h-0 lg:h-full overflow-visible lg:overflow-y-auto">
           <DeviceStatus />
+          <div className="mt-3 space-y-3">
+            <GetDesktopHeroCard />
+            <FoundingBuilderBanner />
+          </div>
         </div>
-        <div className="lg:col-span-4">
+        <div className="lg:col-span-4 h-auto min-h-0 lg:h-full overflow-visible lg:overflow-y-auto">
           <DeviceInfoPanel />
         </div>
-        <div className="lg:col-span-3">
+        <div className="lg:col-span-3 h-auto min-h-0 lg:h-full overflow-visible lg:overflow-hidden">
           <ActionGrid platform={device?.platform || "ALL"} />
         </div>
       </div>
 
-      {/* Cloud exploit DB + Console */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-1 min-h-[480px]">
-        <div className="lg:col-span-5 min-h-[420px]">
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-auto lg:h-[240px] flex-none overflow-visible lg:overflow-hidden">
+        <div className="lg:col-span-5 h-[240px] min-h-0 lg:h-full overflow-hidden">
           <CloudExploitDB />
         </div>
-        <div className="lg:col-span-7 min-h-[420px]">
+        <div className="lg:col-span-7 h-[240px] min-h-0 lg:h-full overflow-hidden">
           <Console height="h-full" />
         </div>
       </div>
 
-      {/* Author credit strip — Made by Braiden Barker + rotating trust signals */}
-      <AuthorCreditStrip />
+      <div className="flex-shrink-0">
+        <AuthorCreditStrip />
+      </div>
     </div>
   );
 }

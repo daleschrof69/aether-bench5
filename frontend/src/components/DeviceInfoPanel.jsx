@@ -41,6 +41,7 @@ export const DeviceInfoPanel = () => {
       <div className="flex-1">
         <Row label="Brand" value={device?.brand} />
         <Row label="Model" value={device?.model} highlight />
+        <Row label="Kind" value={device?.kind} />
         <Row label="Platform" value={device?.platform} />
         <Row label="IMEI 1" value={device?.imei_masked} />
         <Row label="IMEI 2" value={device?.imei2_masked} />
@@ -48,7 +49,7 @@ export const DeviceInfoPanel = () => {
         <Row label="CPU ID" value={device?.cpuId} />
         <Row label="Storage" value={device?.storage} />
         <Row label="RAM" value={device?.ram} />
-        <Row label="Android" value={device ? `Android ${device.android}` : null} />
+        <Row label="Version" value={device?.os && device.os !== "—" ? device.os : device?.android} highlight />
         <Row label="Patch Level" value={device?.patch} />
         <Row label="Bootloader" value={device?.bootloader} />
         <Row label="Region" value={device?.region} />

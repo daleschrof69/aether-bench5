@@ -79,6 +79,10 @@ export const AuthProvider = ({ children }) => {
   };
 
   // Hard refresh credits/plan/etc from server (call after Stripe success)
+  const noteCredits = useCallback((credits) => {
+    setUser((current) => (current && typeof current === "object" ? { ...current, credits } : current));
+  }, []);
+
   const syncProfile = useCallback(async () => {
     try {
       const { data } = await http.get("/auth/me");
@@ -95,13 +99,14 @@ export const AuthProvider = ({ children }) => {
       loading,
       refresh,
       syncProfile,
+      noteCredits,
       loginEmail,
       signupEmail,
       exchangeEmergentSession,
       logout,
       http,
     }),
-    [user, loading, refresh, syncProfile]
+    [user, loading, refresh, syncProfile, noteCredits]
   );
 
   return (

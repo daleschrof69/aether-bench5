@@ -1,5 +1,7 @@
 import React from "react";
+import { toast } from "sonner";
 import { useApp } from "../context/AppContext";
+import { useAuth, formatApiError } from "../context/AuthContext";
 import { Check, Coins, Crown, Zap, ShieldOff, Hash, Smartphone as SmartphoneIcon, Lock, Sparkles, Infinity as InfinityIcon } from "lucide-react";
 
 const PLAN = {
@@ -20,6 +22,7 @@ const PLAN = {
 const SERVICES = [
   {
     key: "frp",
+    actionKey: "bypass_frp",
     name: "Standard Aegis Unlock",
     cost: "FREE",
     cost_value: 0,
@@ -30,27 +33,33 @@ const SERVICES = [
   },
   {
     key: "imei",
+    actionKey: "repair_imei",
     name: "IMEI Repair",
-    cost: "5 Credits",
-    cost_value: 5,
+    cost: "FREE",
+    cost_value: 0,
+    free: true,
     icon: Hash,
     desc: "Restore or rewrite IMEI/MEID on modem partition. Includes Luhn checksum validation.",
     testid: "service-imei",
   },
   {
     key: "kg_suspend",
+    actionKey: "knox_suspend",
     name: "Samsung KG Suspend",
-    cost: "15 Credits",
-    cost_value: 15,
+    cost: "FREE",
+    cost_value: 0,
+    free: true,
     icon: Lock,
     desc: "Suspend Knox Guard / Carrier Lock on Samsung devices via privileged token push.",
     testid: "service-kg",
   },
   {
     key: "iphone_diag",
+    actionKey: "apple_info",
     name: "iPhone Modern Diagnostic",
-    cost: "20 Credits",
-    cost_value: 20,
+    cost: "FREE",
+    cost_value: 0,
+    free: true,
     icon: SmartphoneIcon,
     desc: "Full hardware fingerprint, Activation Lock probe & SoC trust-cache audit (A12 → A18).",
     testid: "service-iphone",
@@ -58,11 +67,31 @@ const SERVICES = [
 ];
 
 export default function Pricing() {
-  const { credits, setCredits, pushLog } = useApp();
+  const { credits, runAction, setImeiModalOpen } = useApp();
+  const { user, http } = useAuth();
 
-  const topUp = (amount) => {
-    setCredits((c) => c + amount);
-    pushLog("SUCCESS", `Account credited with +${amount} credits.`);
+  const startCheckout = async (tierId) => {
+    if (!user) {
+      toast.error("Sign in to buy credits", { description: "Use Sign in on the account page, then return here." });
+      return;
+    }
+    try {
+      const { data } = await http.post("/stripe/checkout", {
+        tier_id: tierId,
+        origin_url: window.location.origin,
+      });
+      window.location.href = data.url;
+    } catch (e) {
+      toast.error(formatApiError(e.response?.data?.detail) || e.message);
+    }
+  };
+
+  const runPricedOp = (service) => {
+    if (service.actionKey === "repair_imei") {
+      setImeiModalOpen(true);
+      return;
+    }
+    runAction(service.actionKey, service.name, {}, service.cost);
   };
 
   return (
@@ -135,6 +164,7 @@ export default function Pricing() {
 
           <button
             data-testid="founding-builder-pricing-cta"
+            onClick={() => startCheckout("founding_lifetime")}
             className="mt-6 w-full h-11 bg-[#00FF41] hover:bg-[#00CC33] text-black font-mono text-xs tracking-[0.22em] uppercase font-bold transition-colors flex items-center justify-center gap-2"
           >
             <Zap className="w-3.5 h-3.5" />
@@ -172,6 +202,7 @@ export default function Pricing() {
 
           <button
             data-testid="plan-renew"
+            onClick={() => startCheckout("solo_annual")}
             className="mt-6 w-full h-10 bg-[#00FF41] hover:bg-[#00CC33] text-black font-mono text-xs tracking-[0.2em] uppercase font-semibold transition-colors"
           >
             Renew License
@@ -231,6 +262,7 @@ export default function Pricing() {
                 </div>
                 <button
                   data-testid={`${s.testid}-buy`}
+                  onClick={() => runPricedOp(s)}
                   disabled={!canAfford && !s.free}
                   className={`h-9 px-4 font-mono text-[10px] tracking-[0.2em] uppercase border transition-colors ${
                     s.free
@@ -258,11 +290,11 @@ export default function Pricing() {
         </div>
         <div className="grid grid-cols-2 md:grid-cols-5 gap-px bg-white/5">
           {[
-            { credits: 15, price: 9, label: "Impulse", tagline: "1 op = $0.60" },
-            { credits: 50, price: 19, label: "Starter" },
-            { credits: 150, price: 49, label: "Builder", popular: true },
-            { credits: 500, price: 149, label: "Workshop" },
-            { credits: 2000, price: 499, label: "Wholesale" },
+            { tier_id: "credits_impulse", credits: 15, price: 9, label: "Impulse", tagline: "1 op = $0.60" },
+            { tier_id: "credits_starter", credits: 50, price: 19, label: "Starter" },
+            { tier_id: "credits_builder", credits: 150, price: 49, label: "Builder", popular: true },
+            { tier_id: "credits_workshop", credits: 500, price: 149, label: "Workshop" },
+            { tier_id: "credits_wholesale", credits: 2000, price: 499, label: "Wholesale" },
           ].map((pack) => (
             <div
               key={pack.credits}
@@ -288,7 +320,7 @@ export default function Pricing() {
               )}
               <button
                 data-testid={`topup-${pack.credits}`}
-                onClick={() => topUp(pack.credits)}
+                onClick={() => startCheckout(pack.tier_id)}
                 className="mt-auto h-9 border border-[#00FF41]/30 hover:bg-[#00FF41]/10 text-[#00FF41] font-mono text-[10px] tracking-[0.2em] uppercase transition-colors"
               >
                 Buy Pack

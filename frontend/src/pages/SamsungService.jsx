@@ -1,5 +1,5 @@
 import React from "react";
-import { ActionGrid, SAMSUNG_ACTIONS } from "../components/ActionGrid";
+import { ActionGrid, OFFICIAL_ACTIONS, SAMSUNG_ACTIONS } from "../components/ActionGrid";
 import { DeviceInfoPanel } from "../components/DeviceInfoPanel";
 import { Console } from "../components/Console";
 import { useApp } from "../context/AppContext";
@@ -36,7 +36,7 @@ export default function SamsungService() {
         <div className="flex-1">
           <h1 className="text-xl font-bold tracking-tight">Samsung Service Module</h1>
           <p className="font-mono text-[11px] tracking-[0.18em] uppercase text-white/40 mt-1">
-            Odin · Download Mode · Heimdall {heimdallReady || "v?"} · Loke protocol
+            Odin · Download Mode · Heimdall {heimdallReady || "v?"} · Smart Switch
           </p>
         </div>
         <div className="text-right">
@@ -124,7 +124,10 @@ export default function SamsungService() {
       {/* Body */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-shrink-0">
         <div className="lg:col-span-8">
-          <ActionGrid platform="Samsung" actions={SAMSUNG_ACTIONS} title="Samsung Operations" />
+          <ActionGrid platform="Samsung" actions={SAMSUNG_ACTIONS} title="Samsung Operations" columns={2} />
+          <div className="mt-3">
+            <ActionGrid platform="ALL" actions={OFFICIAL_ACTIONS} title="Official Commands" columns={2} requireDevice={false} />
+          </div>
         </div>
         <div className="lg:col-span-4">
           <DeviceInfoPanel />

@@ -64,6 +64,11 @@ fn find_named(names: &[&str]) -> Result<String> {
     find_tool(names, LIBIMOBILEDEVICE_HINT)
 }
 
+/// Path to a libimobiledevice binary on PATH or in the Aether Apple tools folder.
+pub fn locate_tool(names: &[&str]) -> Option<String> {
+    find_named(names).ok()
+}
+
 fn find_irecovery() -> Result<String> {
     find_named(&["irecovery", "irecovery.exe"])
 }

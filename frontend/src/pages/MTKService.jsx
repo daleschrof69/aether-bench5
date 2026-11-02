@@ -66,7 +66,7 @@ export default function MTKService() {
       {/* Body */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 flex-shrink-0">
         <div className="lg:col-span-8">
-          <ActionGrid platform="MediaTek" actions={MTK_ACTIONS} title="MediaTek Operations" />
+          <ActionGrid platform="MediaTek" actions={MTK_ACTIONS} title="MediaTek Operations" columns={2} />
         </div>
         <div className="lg:col-span-4">
           <DeviceInfoPanel />

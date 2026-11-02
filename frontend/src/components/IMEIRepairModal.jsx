@@ -84,7 +84,7 @@ export const IMEIRepairModal = () => {
 
   const submit = () => {
     if (!canSubmit) return;
-    runAction("repair_imei", "Repair IMEI", { imei1, imei2: imei2 || undefined });
+    runAction("repair_imei", "Repair IMEI", { imei1, imei2: imei2 || undefined }, "Free");
     handleClose(false);
   };
 
@@ -102,7 +102,7 @@ export const IMEIRepairModal = () => {
           <div className="flex-1 min-w-0">
             <DialogTitle className="text-lg font-bold tracking-tight text-white">Repair IMEI</DialogTitle>
             <DialogDescription className="font-mono text-[10px] tracking-[0.18em] uppercase text-white/40 mt-1">
-              Write IMEI to the modem NV partition · 5 credits
+              Write IMEI to the modem NV partition · free
             </DialogDescription>
           </div>
         </div>

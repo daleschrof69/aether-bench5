@@ -34,7 +34,7 @@ function AppShell() {
   const location = useLocation();
   return (
     <AppProvider>
-      <div className="h-screen w-screen flex flex-col bg-black text-white overflow-hidden">
+      <div className="h-dvh w-full min-w-0 flex flex-col bg-black text-white overflow-hidden">
         <WindowChrome />
         <div className="flex-1 flex min-h-0">
           <Sidebar />
