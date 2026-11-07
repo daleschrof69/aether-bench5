@@ -1,0 +1,334 @@
+#!/usr/bin/env bash
+# aether installer — Ubuntu 22.04/24.04. Idempotent; safe to re-run.
+set -euo pipefail
+
+BIN=/usr/local/bin/aether
+RULE=/etc/udev/rules.d/51-aether.rules
+if [ "$EUID" -eq 0 ]; then SUDO=""; else SUDO="sudo"; fi
+
+say() { printf '\033[32m[aether]\033[0m %s\n' "$*"; }
+die() { printf '\033[31m[aether]\033[0m %s\n' "$*" >&2; exit 1; }
+
+command -v apt-get >/dev/null || die "needs apt (Ubuntu/Debian)"
+[ "$(uname -s)" = Linux ] || die "needs Linux"
+
+say "installing python3 + pyusb"
+$SUDO apt-get update -qq
+$SUDO apt-get install -y -qq python3 python3-usb >/dev/null
+
+say "writing udev rules"
+$SUDO tee "$RULE" >/dev/null <<'RULE'
+# Aether: MTK BROM / Qualcomm EDL / Apple DFU / Huawei
+SUBSYSTEM=="usb", ATTR{idVendor}=="0e8d", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="05c6", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="05ac", MODE="0666", GROUP="plugdev"
+SUBSYSTEM=="usb", ATTR{idVendor}=="12d1", MODE="0666", GROUP="plugdev"
+RULE
+$SUDO udevadm control --reload-rules
+$SUDO udevadm trigger
+$SUDO usermod -aG plugdev "$(id -un)" 2>/dev/null || true
+
+say "installing $BIN"
+$SUDO tee "$BIN" >/dev/null <<'PYEOF'
+#!/usr/bin/env python3
+"""aether — MTK BROM / Qualcomm Sahara / Apple DFU operator CLI."""
+import argparse, struct, sys, time
+
+try:
+    import usb.core, usb.util
+except ImportError:
+    sys.exit("pyusb missing: sudo apt install python3-usb")
+
+VERSION = "0.3.0"
+VIDS = {0x0E8D: "mtk", 0x05C6: "qcom", 0x05AC: "apple", 0x12D1: "hisi"}
+PIDS = {(0x0E8D, 0x0003): "BROM", (0x0E8D, 0x2000): "PRELOADER",
+        (0x05C6, 0x9008): "EDL", (0x05AC, 0x1227): "DFU"}
+OP = {"RD16": 0xD0, "RD32": 0xD1, "WR16": 0xD2, "WR32": 0xD3, "WR8": 0xD4, "JUMP": 0xD5}
+WDOG, WDOG_VAL = 0x10007000, 0x22000064
+HW = {0x6765: "MT6765", 0x6768: "MT6768", 0x6833: "MT6833", 0x6853: "MT6853",
+      0x6873: "MT6873", 0x6877: "MT6877", 0x6893: "MT6893", 0x6983: "MT6983", 0x6985: "MT6985"}
+
+
+class Err(Exception):
+    def __init__(self, code, detail, exit_=60):
+        super().__init__(detail)
+        self.code, self.exit = code, exit_
+
+
+class Trace:
+    on = False
+
+    @classmethod
+    def show(cls, tag, data):
+        if cls.on:
+            print(f"    {tag} {data[:32].hex(' ')}", file=sys.stderr)
+
+
+class Link:
+    def __init__(self, dev):
+        self.dev = dev
+        try:
+            dev.set_configuration()
+        except usb.core.USBError as e:
+            raise Err("AETH-USB-002", f"cannot configure: {e}", 22) from e
+        cfg = dev.get_active_configuration()
+        iface = cfg[(0, 0)]
+        out = lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_OUT
+        inn = lambda e: usb.util.endpoint_direction(e.bEndpointAddress) == usb.util.ENDPOINT_IN
+        self.ep_out = usb.util.find_descriptor(iface, custom_match=out)
+        self.ep_in = usb.util.find_descriptor(iface, custom_match=inn)
+        if not self.ep_out or not self.ep_in:
+            raise Err("AETH-CAP-001", "no bulk pair on interface 0", 30)
+
+    def write(self, data, timeout=4000):
+        Trace.show("tx", bytes(data))
+        self.ep_out.write(data, timeout)
+
+    def read(self, n, timeout=4000):
+        d = bytes(self.ep_in.read(n, timeout))
+        Trace.show("rx", d)
+        return d
+
+
+def find(vid=None, pid=None):
+    args = {}
+    if vid: args["idVendor"] = vid
+    if pid: args["idProduct"] = pid
+    devs = [d for d in usb.core.find(find_all=True, **args) if d.idVendor in VIDS]
+    return devs
+
+
+class Brom:
+    def __init__(self, link):
+        self.link, self.sector, self.gpt = link, 512, []
+
+    def handshake(self):
+        for _ in range(6):
+            try:
+                self.link.write(b"\xa0", 1200)
+                if self.link.read(1, 1200) == b"\x5f":
+                    self.link.write(b"\x0a", 1200)
+                    self.kick()
+                    return
+            except usb.core.USBTimeoutError:
+                continue
+        raise Err("AETH-MOD-001", "BROM sync failed — hold vol+/vol- and re-plug", 25)
+
+    def kick(self):
+        try:
+            self.write32(WDOG, WDOG_VAL)
+        except Err:
+            pass
+
+    def _hdr(self, op, addr, size):
+        return bytes([op]) + addr.to_bytes(4, "little") + size.to_bytes(4, "little")
+
+    def _status(self):
+        st = int.from_bytes(self.link.read(2), "little")
+        if st:
+            hint = " (SLA/DAA active — needs DA)" if st == 0x1F else ""
+            raise Err("AETH-BRM-001", f"status {st:#06x}{hint}", 36)
+
+    def read32(self, addr):
+        self.link.write(self._hdr(OP["RD32"], addr, 4))
+        self._status()
+        return int.from_bytes(self.link.read(4), "little")
+
+    def write32(self, addr, val):
+        self.kick()
+        self.link.write(self._hdr(OP["WR32"], addr, 4))
+        self.link.write(val.to_bytes(4, "little"))
+        self._status()
+
+    def xread(self, addr, size):
+        out = bytearray()
+        while len(out) < size:
+            n = min(4, size - len(out))
+            self.link.write(self._hdr(OP["RD32"], addr + len(out), 4))
+            self._status()
+            out += self.link.read(n)
+        return bytes(out)
+
+    def xwrite(self, addr, data):
+        off = 0
+        while off < len(data):
+            n = min(4, len(data) - off)
+            self.kick()
+            self.link.write(self._hdr(OP["WR32"], addr + off, 4))
+            self.link.write(data[off:off + n])
+            self._status()
+            off += n
+
+    def identify(self):
+        hw = self.read32(0x08000000)
+        return hw, HW.get(hw & 0xFFFF, f"MT{(hw & 0xFFFF):04X}")
+
+    def gpt_read(self):
+        hdr = self.xread(0x200, 92)
+        if hdr[:8] != b"EFI PART":
+            raise Err("AETH-DA-001", "no GPT signature at LBA1", 40)
+        elba = int.from_bytes(hdr[72:76], "little")
+        count = int.from_bytes(hdr[80:84], "little")
+        esize = int.from_bytes(hdr[84:88], "little")
+        if count > 128 or esize < 128:
+            raise Err("AETH-DA-001", "implausible GPT geometry", 40)
+        raw = self.xread(elba * self.sector, count * esize)
+        self.gpt = []
+        for i in range(count):
+            e = raw[i * esize:(i + 1) * esize]
+            name = e[56:128].decode("utf-16-le", "ignore").rstrip("\x00")
+            if not name:
+                continue
+            start = int.from_bytes(e[32:36], "little")
+            end = int.from_bytes(e[40:44], "little")
+            self.gpt.append((name, start, (end - start + 1) * self.sector))
+        return self.gpt
+
+    def part(self, name):
+        hit = next((p for p in self.gpt if p[0] == name), None) or next((p for p in self.gpt if p[0].startswith(name)), None)
+        if not hit:
+            raise Err("AETH-ART-001", f'partition "{name}" not in GPT', 48)
+        return hit
+
+    def zero(self, name, block=4096, yes=False):
+        nm, start, size = self.part(name)
+        print(f"  zeroing {nm} · {size} bytes @ {start * self.sector:#x}")
+        if not yes:
+            input("  enter to start, ^C to abort ")
+        off = 0
+        t0 = time.time()
+        while off < size:
+            n = min(block, size - off)
+            self.xwrite(start * self.sector + off, b"\x00" * n)
+            off += n
+            pct = off * 100 // size
+            print(f"\r  {pct:3d}%  {off}/{size}", end="", flush=True)
+        print(f"\n  done in {time.time() - t0:.1f}s")
+
+    def dump(self, name, path, block=8192):
+        nm, start, size = self.part(name)
+        with open(path, "wb") as fh:
+            off = 0
+            while off < size:
+                n = min(block, size - off)
+                fh.write(self.xread(start * self.sector + off, n))
+                off += n
+                print(f"\r  {off * 100 // size:3d}%  {path}", end="", flush=True)
+        print(f"\n  wrote {path} ({size} bytes)")
+
+    def reset(self):
+        try:
+            self.write32(0x10007000, 0)
+            self.link.write(bytes([OP["JUMP"]]) + (0).to_bytes(4, "little"))
+        except Err:
+            pass
+
+
+def need_one():
+    devs = find()
+    if not devs:
+        raise Err("AETH-USB-001", "no device — is it in BROM/EDL/DFU and is the udev rule loaded?", 20)
+    if len(devs) > 1:
+        raise Err("AETH-USB-002", f"{len(devs)} devices attached — unplug all but one", 22)
+    return devs[0]
+
+
+def brom_link():
+    d = need_one()
+    if d.idVendor != 0x0E8D:
+        raise Err("AETH-SOC-002", f"not MediaTek (vid {d.idVendor:#06x})", 28)
+    return Brom(Link(d))
+
+
+# ---------- commands ----------
+def c_doctor(a):
+    ok = True
+    print(f"aether {VERSION} — self test\n")
+    for label, fn in [
+        ("pyusb import", lambda: usb.core.find(find_all=True) is not None),
+        ("udev rule", lambda: __import__("os").path.exists("/etc/udev/rules.d/51-aether.rules")),
+        ("plugdev member", lambda: "plugdev" in __import__("grp").getgrnam("plugdev").gr_mem),
+    ]:
+        try:
+            print(f"  [ok]   {label}" if fn() else f"  [warn] {label}")
+        except Exception as e:
+            ok = False
+            print(f"  [fail] {label}: {e}")
+    devs = find()
+    print(f"\n  devices: {len(devs)}")
+    for d in devs:
+        mode = PIDS.get((d.idVendor, d.idProduct), "?")
+        print(f"    {d.idVendor:04x}:{d.idProduct:04x}  {mode}")
+    print("\nready" if ok and devs else "\nno device attached — plug one in")
+    return 0
+
+
+def c_scan(a):
+    devs = find()
+    if not devs:
+        print("no matching devices")
+        return 1
+    for d in devs:
+        print(f"{d.idVendor:04x}:{d.idProduct:04x}  {PIDS.get((d.idVendor, d.idProduct), '?')}  bus {d.bus} addr {d.address}")
+    return 0
+
+
+def c_info(a):
+    b = brom_link()
+    b.handshake()
+    hw, soc = b.identify()
+    print(f"  hw code {hw:#010x} → {soc}")
+    try:
+        print(f"  hw sub  {b.read32(0x08000008):#010x}")
+    except Err:
+        pass
+    return 0
+
+
+def c_parts(a):
+    b = brom_link()
+    b.handshake()
+    for name, start, size in b.gpt_read():
+        print(f"  {name:<20} @ {start * 512:#012x}  {size:>10} bytes")
+    return 0
+
+
+def c_frp(a):
+    b = brom_link()
+    b.handshake()
+    b.gpt_read()
+    b.zero("frp", yes=a.yes)
+    b.reset()
+    print("  frp cleared — boot to system")
+    return 0
+
+
+def c_persist(a):
+    b = brom_link()
+    b.handshake()
+    b.gpt_read()
+    b.zero("persist", yes=a.yes)
+    b.reset()
+    return 0
+
+
+def c_dump(a):
+    b = brom_link()
+    b.handshake()
+    b.gpt_read()
+    b.dump(a.partition, a.out)
+    return 0
+
+
+def c_edl(a):
+    d = need_one()
+    if (d.idVendor, d.idProduct) != (0x05C6, 0x9008):
+        raise Err("AETH-MOD-002", "not in EDL (05c6:9008)", 26)
+    link = Link(d)
+    h = link.read(8, 3000)
+    cmd, ln = struct.unpack_from("<II", h)
+    if cmd != 0x01:
+        raise Err("AETH-QCM-003", f"expected HELLO, got {cmd:#x}", 42)
+    body = link.read(ln - 8, 3000)
+    ver, _min, _max, mode = struct.unpack_from("<IIII", body, 0)
+    link
