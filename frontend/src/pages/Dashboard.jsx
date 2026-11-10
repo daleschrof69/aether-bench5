@@ -4,6 +4,7 @@ import { DeviceInfoPanel } from "../components/DeviceInfoPanel";
 import { ActionGrid } from "../components/ActionGrid";
 import { Console } from "../components/Console";
 import { CloudExploitDB } from "../components/CloudExploitDB";
+import { ExploitPanel } from "../components/ExploitPanel";
 import { FoundingBuilderBanner } from "../components/FoundingBuilderBanner";
 import { DemoModeBanner } from "../components/DemoModeBanner";
 import { GetDesktopHeroCard } from "../components/GetDesktopHeroCard";
@@ -83,6 +84,12 @@ export default function Dashboard() {
         </div>
         <div className="lg:col-span-7 h-[240px] min-h-0 lg:h-full overflow-hidden">
           <Console height="h-full" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-3 h-auto lg:h-[220px] flex-none overflow-visible lg:overflow-hidden mt-3">
+        <div className="lg:col-span-12 h-[220px] min-h-0 lg:h-full overflow-hidden">
+          <ExploitPanel profile={device} />
         </div>
       </div>
 

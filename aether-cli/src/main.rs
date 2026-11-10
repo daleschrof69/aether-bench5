@@ -140,6 +140,22 @@ enum Command {
         #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
         args: Vec<String>,
     },
+    /// Run a registry-backed exploit plan fetched from the local backend.
+    /// List available exploits with no --id; run one with --id <exploit_id>.
+    Exploit {
+        /// Exploit id from the backend registry (omit to list available).
+        #[arg(long)]
+        id: Option<String>,
+        /// Dry-run: print the plan without touching the device.
+        #[arg(long)]
+        dry_run: bool,
+        /// Confirm destructive steps (required for tier >= 2).
+        #[arg(long)]
+        yes: bool,
+        /// Backend base URL serving /api/exploits/*.
+        #[arg(long, default_value = "http://127.0.0.1:8001")]
+        backend: String,
+    },
 }
 
 fn print_banner() {
@@ -274,6 +290,29 @@ async fn main() -> anyhow::Result<()> {
             print!("{output}");
             if code != 0 {
                 anyhow::bail!("{tool} exited {code}");
+            }
+        }
+        Command::Exploit { id, dry_run, yes, backend } => {
+            let plan: exploit::Plan = match id {
+                Some(id) => reqwest::blocking::Client::new()
+                    .post(format!("{backend}/api/exploits/{id}/plan"))
+                    .send()?
+                    .error_for_status()?
+                    .json()?,
+                None => {
+                    let rows: Vec<exploit::LocalExploit> = reqwest::blocking::Client::new()
+                        .get(format!("{backend}/api/exploits"))
+                        .send()?
+                        .json()?;
+                    for e in exploit::local_filter(rows, None, None) {
+                        println!("[t{}] {}  {}", e.tier, e.id, e.name);
+                    }
+                    return Ok(());
+                }
+            };
+            for result in exploit::run(&plan, dry_run || !yes, yes)? {
+                println!("[{}] {} -> {}", result.phase, result.cmd, result.code);
+                print!("{}", result.stdout);
             }
         }
     }
