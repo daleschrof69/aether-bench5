@@ -194,6 +194,55 @@ fn spawn_pip_edl_job(write: WsSink) -> String {
     spawn_job(Vec::new(), write, JobTool::PipEdl)
 }
 
+/// Spawn a read-only identity / diagnostic job. Streams a short summary and
+/// one `AETHER_DIAG {json}` line for the dashboard.
+fn spawn_diag_job(port: String, section: String, dry_run: bool, write: WsSink) -> String {
+    let job_id = new_job_id();
+    let jid = job_id.clone();
+    tokio::spawn(async move {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<mtkclient::StreamLine>();
+        let run_task =
+            tokio::spawn(async move { crate::diag::run_streaming(&port, &section, dry_run, tx).await });
+        while let Some(sl) = rx.recv().await {
+            send_json(
+                &write,
+                json!({
+                    "jsonrpc": "2.0",
+                    "method": "event",
+                    "params": { "job_id": jid, "stream": sl.stream, "line": sl.line },
+                }),
+            )
+            .await;
+        }
+        let exit = match run_task.await {
+            Ok(Ok(code)) => code,
+            Ok(Err(e)) => {
+                send_json(
+                    &write,
+                    json!({
+                        "jsonrpc": "2.0",
+                        "method": "event",
+                        "params": { "job_id": jid, "stream": "stderr", "line": format!("aether: {}", e) },
+                    }),
+                )
+                .await;
+                -1
+            }
+            Err(_) => -1,
+        };
+        send_json(
+            &write,
+            json!({
+                "jsonrpc": "2.0",
+                "method": "event",
+                "params": { "job_id": jid, "stream": "done", "exit_code": exit },
+            }),
+        )
+        .await;
+    });
+    job_id
+}
+
 /// Spawn an `irecovery -q` (Apple device info) job.
 fn spawn_apple_info_job(write: WsSink) -> String {
     spawn_job(Vec::new(), write, JobTool::AppleInfo)
@@ -339,6 +388,12 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
                 "capabilities": [
                     "devices",
                     "info",
+                    "diag.status",
+                    "diag.read",
+                    "diag.identity",
+                    "diag.firmware",
+                    "diag.battery",
+                    "diag.storage",
                     "mtk.frp_bypass",
                     "mtk.repair_imei",
                     "mtk.unlock_bootloader",
@@ -377,6 +432,14 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
             }))
         }
         "devices" => Ok(json!({ "devices": crate::usb::devices_as_json().unwrap_or_default() })),
+        // Fast connection list (USB descriptors plus ADB / fastboot / lockdown).
+        "diag.status" => {
+            let port = params
+                .get("port")
+                .and_then(|v| v.as_str())
+                .unwrap_or("auto");
+            Ok(crate::diag::status_value(port).await)
+        }
         "phones.identify" => Ok(crate::identify::identify().await),
         // Explicit Qualcomm EDL / 9008 mode detection.
         "qualcomm.detect_edl" => {
@@ -462,6 +525,31 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
         // Qualcomm safe format: erase userdata over Firehose.
         "qualcomm.safe_format" => {
             let job_id = spawn_edl_job(vec!["e".into(), "userdata".into()], write.clone());
+            Ok(json!({ "job_id": job_id, "status": "started" }))
+        }
+
+        "info" | "diag.read" | "diag.identity" | "diag.firmware" | "diag.battery"
+        | "diag.storage" => {
+            let port = params
+                .get("port")
+                .and_then(|v| v.as_str())
+                .unwrap_or("auto")
+                .to_string();
+            let section = match method {
+                "diag.firmware" => "firmware",
+                "diag.battery" => "battery",
+                "diag.storage" => "storage",
+                _ => params
+                    .get("section")
+                    .and_then(|v| v.as_str())
+                    .unwrap_or("identity"),
+            }
+            .to_string();
+            let dry_run = params
+                .get("dry_run")
+                .and_then(|v| v.as_bool())
+                .unwrap_or(false);
+            let job_id = spawn_diag_job(port, section, dry_run, write.clone());
             Ok(json!({ "job_id": job_id, "status": "started" }))
         }
 

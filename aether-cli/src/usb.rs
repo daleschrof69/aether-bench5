@@ -45,54 +45,246 @@ fn enumerate() -> Vec<(Device<Context>, DeviceDescriptor)> {
     out
 }
 
-/// Pretty-print a single USB device row.
-fn fmt_device<T: UsbContext>(d: &Device<T>, desc: &DeviceDescriptor) -> String {
-    let vid = desc.vendor_id();
-    let pid = desc.product_id();
-    let bus = d.bus_number();
-    let addr = d.address();
-    let class = format!("{:?}", desc.class_code());
-    let manufacturer = d
-        .open()
-        .ok()
-        .and_then(|h| h.read_manufacturer_string_ascii(desc).ok())
-        .unwrap_or_else(|| "—".into());
-    let product = d
-        .open()
-        .ok()
-        .and_then(|h| h.read_product_string_ascii(desc).ok())
-        .unwrap_or_else(|| "—".into());
-    format!(
-        "  bus {:>3} · addr {:>3} | {:04x}:{:04x} | {:<12} | {} {}",
-        bus, addr, vid, pid, class, manufacturer.dimmed(), product
-    )
+/// How a supported phone presents on USB. Used to choose a read-only identity
+/// query. Modes that only expose the USB descriptor stay descriptor-only.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UsbKind {
+    Mtk,
+    QualcommEdl,
+    QualcommDiag,
+    SamsungDownload,
+    AppleDfu,
+    AppleRecovery,
+    AppleNormal,
+    Fastboot,
+    Adb,
+    Mtp,
+    DescriptorOnly,
+    Unknown,
+}
+
+/// VID/PID classification aligned with `frontend/src/lib/usbSignatures.js`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UsbSignature {
+    pub platform: &'static str,
+    pub brand: &'static str,
+    pub mode: &'static str,
+    pub kind: UsbKind,
+}
+
+/// Exact VID:PID match. Vendor-only fallbacks are handled separately so a
+/// random accessory with a known vendor id is not treated as a phone mode.
+pub fn exact_signature(vid: u16, pid: u16) -> Option<UsbSignature> {
+    let (platform, brand, mode, kind) = match (vid, pid) {
+        (0x0e8d, 0x0003) => ("MediaTek", "MediaTek", "Preloader", UsbKind::Mtk),
+        (0x0e8d, 0x2000) => ("MediaTek", "MediaTek", "BROM (Boot ROM)", UsbKind::Mtk),
+        (0x0e8d, 0x2001) => ("MediaTek", "MediaTek", "Preloader (DA)", UsbKind::Mtk),
+        (0x0e8d, 0x201c) => ("MediaTek", "MediaTek", "BROM (secure)", UsbKind::Mtk),
+
+        (0x05c6, 0x9008) => (
+            "Qualcomm",
+            "Qualcomm",
+            "EDL 9008 (Sahara)",
+            UsbKind::QualcommEdl,
+        ),
+        (0x05c6, 0x9006) => (
+            "Qualcomm",
+            "Qualcomm",
+            "QDLoader (mass storage)",
+            UsbKind::QualcommEdl,
+        ),
+        (0x05c6, 0x676c) => (
+            "Qualcomm",
+            "Qualcomm",
+            "QDLoader HS-USB",
+            UsbKind::QualcommEdl,
+        ),
+        (0x05c6, 0x9091) => (
+            "Qualcomm",
+            "Qualcomm",
+            "EDL (Firehose)",
+            UsbKind::QualcommEdl,
+        ),
+        (0x05c6, 0x90b8) => (
+            "Qualcomm",
+            "Qualcomm",
+            "EDL (OEM 90b8)",
+            UsbKind::QualcommEdl,
+        ),
+        (0x05c6, 0x900e) => (
+            "Qualcomm",
+            "Qualcomm",
+            "Diagnostic (DIAG)",
+            UsbKind::QualcommDiag,
+        ),
+
+        (0x05ac, 0x1227) => ("Apple", "Apple", "DFU mode", UsbKind::AppleDfu),
+        (0x05ac, 0x1338) => ("Apple", "Apple", "Restore (DFU)", UsbKind::AppleDfu),
+        (0x05ac, 0x1281) => ("Apple", "Apple", "Recovery mode", UsbKind::AppleRecovery),
+        (0x05ac, 0x12a8) => ("Apple", "Apple", "Normal (iPhone)", UsbKind::AppleNormal),
+        (0x05ac, 0x12aa) => ("Apple", "Apple", "Normal (iPod/iPad)", UsbKind::AppleNormal),
+
+        (0x04e8, 0x685d) => (
+            "Samsung",
+            "Samsung",
+            "Download mode (Odin)",
+            UsbKind::SamsungDownload,
+        ),
+        (0x04e8, 0x6601) => ("Samsung", "Samsung", "Upload mode", UsbKind::DescriptorOnly),
+        (0x04e8, 0x685e) => ("Samsung", "Samsung", "Kies", UsbKind::DescriptorOnly),
+        (0x04e8, 0x6860) | (0x04e8, 0x6865) | (0x04e8, 0x6866) => {
+            ("Samsung", "Samsung", "Normal (MTP)", UsbKind::Mtp)
+        }
+
+        (0x18d1, 0x4ee0) | (0x18d1, 0xd00d) => {
+            ("Android", "Google / Android", "Fastboot", UsbKind::Fastboot)
+        }
+        (0x18d1, 0x4ee7) => ("Android", "Google / Android", "ADB", UsbKind::Adb),
+        (0x18d1, 0x4ee1) => ("Android", "Google / Android", "Normal (MTP)", UsbKind::Mtp),
+        (0x18d1, 0x4ee2)
+        | (0x18d1, 0x4ee3)
+        | (0x18d1, 0x4ee4)
+        | (0x18d1, 0x4ee5)
+        | (0x18d1, 0x4ee6) => ("Android", "Google / Android", "ADB / MTP", UsbKind::Adb),
+
+        (0x2717, 0xff40) | (0x2717, 0xff48) => ("Android", "Xiaomi", "Normal (MTP)", UsbKind::Mtp),
+        (0x2a45, 0x4ee0) => ("Android", "Meizu", "Normal (MTP)", UsbKind::Mtp),
+        (0x22b8, 0x2e76) | (0x22b8, 0x2e80) => {
+            ("Android", "Motorola", "Fastboot", UsbKind::Fastboot)
+        }
+        _ => return None,
+    };
+    Some(UsbSignature {
+        platform,
+        brand,
+        mode,
+        kind,
+    })
+}
+
+fn vendor_fallback(vid: u16) -> Option<UsbSignature> {
+    let (platform, brand) = match vid {
+        0x0e8d => ("MediaTek", "MediaTek"),
+        0x05c6 => ("Qualcomm", "Qualcomm"),
+        // Apple keyboards and trackpads share 05ac. Only the exact phone
+        // PIDs above are treated as iPhone/iPad connections.
+        0x04e8 => ("Samsung", "Samsung"),
+        0x18d1 => ("Android", "Google / Android"),
+        0x2717 | 0x2b4c => ("Android", "Xiaomi"),
+        0x22b8 => ("Android", "Motorola"),
+        0x1004 => ("Android", "LG"),
+        0x12d1 => ("Android", "Huawei"),
+        0x0bb4 => ("Android", "HTC / OnePlus"),
+        0x2a70 => ("Android", "OnePlus"),
+        0x22d9 => ("Android", "OPPO / Realme"),
+        0x2d95 => ("Android", "Vivo"),
+        0x1782 => ("Unisoc", "Spreadtrum / Unisoc"),
+        0x0fce | 0x0489 => ("Android", "Sony"),
+        0x19d2 => ("Android", "ZTE"),
+        0x0b05 => ("Android", "ASUS"),
+        _ => return None,
+    };
+    Some(UsbSignature {
+        platform,
+        brand,
+        mode: "USB",
+        kind: UsbKind::DescriptorOnly,
+    })
+}
+
+pub fn signature(vid: u16, pid: u16) -> Option<UsbSignature> {
+    exact_signature(vid, pid).or_else(|| vendor_fallback(vid))
 }
 
 /// Match a USB device against known repair-mode signatures.
+///
+/// Returns the mode label only for an exact VID:PID. Vendor-only devices stay
+/// untagged so hubs and accessories are not highlighted as phone modes.
 fn classify(desc: &DeviceDescriptor) -> Option<&'static str> {
-    match (desc.vendor_id(), desc.product_id()) {
-        // MediaTek BROM / Preloader
-        (0x0e8d, 0x2000) | (0x0e8d, 0x0003) => Some("MediaTek BROM / Preloader"),
-        // Qualcomm EDL / Sahara / Firehose (9008 family)
-        (0x05c6, 0x9008) => Some("Qualcomm EDL 9008 (Sahara/Firehose)"),
-        (0x05c6, 0x9006) => Some("Qualcomm EDL (legacy 9006)"),
-        (0x05c6, 0x900e) => Some("Qualcomm Diag"),
-        (0x05c6, 0x9091) => Some("Qualcomm EDL (OEM 9091)"),
-        (0x05c6, 0x90b8) => Some("Qualcomm EDL (OEM 90b8)"),
-        // Android MTP (file transfer)
-        (0x18d1, 0x4ee1) | (0x18d1, 0x4ee2) | (0x18d1, 0x4ee3)
-        | (0x18d1, 0x4ee4) | (0x18d1, 0x4ee5) | (0x18d1, 0x4ee6)
-        | (0x18d1, 0x4ee7) => Some("Android MTP"),
-        (0x04e8, 0x6860) | (0x04e8, 0x6865) | (0x04e8, 0x6866) => Some("Samsung MTP"),
-        (0x2717, 0xff40) | (0x2717, 0xff48) => Some("Xiaomi MTP"),
-        (0x2a45, 0x4ee0) => Some("Meizu MTP"),
-        // Apple DFU / Recovery
-        (0x05ac, 0x1227) => Some("Apple DFU mode"),
-        (0x05ac, 0x1281) => Some("Apple Recovery mode"),
-        // Samsung Download mode
-        (0x04e8, 0x685d) => Some("Samsung Download mode"),
-        _ => None,
+    exact_signature(desc.vendor_id(), desc.product_id()).map(|s| s.mode)
+}
+
+/// One attached USB device, including descriptor strings when the host can read them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UsbIdentity {
+    pub bus: u8,
+    pub addr: u8,
+    pub vid: String,
+    pub pid: String,
+    pub manufacturer: String,
+    pub product: String,
+    pub serial: String,
+    pub bcd_device: String,
+    pub platform: Option<&'static str>,
+    pub brand: Option<&'static str>,
+    pub mode: Option<&'static str>,
+    pub kind: UsbKind,
+}
+
+fn blank_to_null(value: &str) -> Option<&str> {
+    if value.is_empty() || value == "—" {
+        None
+    } else {
+        Some(value)
     }
+}
+
+fn dash_if_empty(value: String) -> String {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "—".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+fn identity_from(d: &Device<Context>, desc: &DeviceDescriptor) -> UsbIdentity {
+    let sig = signature(desc.vendor_id(), desc.product_id());
+    let exact = exact_signature(desc.vendor_id(), desc.product_id());
+    // Opening every hub and keyboard on Windows stalls the scan. Read
+    // descriptor strings only for phone vendors and known modes.
+    let readable = exact.is_some() || phone_vendor(desc.vendor_id());
+    let (manufacturer, product, serial) = if readable {
+        match d.open() {
+            Ok(handle) => {
+                let manufacturer = handle
+                    .read_manufacturer_string_ascii(desc)
+                    .unwrap_or_else(|_| "—".into());
+                let product = handle
+                    .read_product_string_ascii(desc)
+                    .unwrap_or_else(|_| "—".into());
+                let serial = handle
+                    .read_serial_number_string_ascii(desc)
+                    .unwrap_or_else(|_| "—".into());
+                (manufacturer, product, serial)
+            }
+            Err(_) => ("—".into(), "—".into(), "—".into()),
+        }
+    } else {
+        ("—".into(), "—".into(), "—".into())
+    };
+    UsbIdentity {
+        bus: d.bus_number(),
+        addr: d.address(),
+        vid: format!("{:04x}", desc.vendor_id()),
+        pid: format!("{:04x}", desc.product_id()),
+        manufacturer: dash_if_empty(manufacturer),
+        product: dash_if_empty(product),
+        serial: dash_if_empty(serial),
+        bcd_device: desc.device_version().to_string(),
+        platform: sig.map(|s| s.platform),
+        brand: sig.map(|s| s.brand),
+        mode: exact.map(|s| s.mode),
+        kind: sig.map(|s| s.kind).unwrap_or(UsbKind::Unknown),
+    }
+}
+
+/// Enumerate USB devices with descriptor identity. Empty when libusb is unavailable.
+pub fn identities() -> Vec<UsbIdentity> {
+    enumerate()
+        .iter()
+        .map(|(d, desc)| identity_from(d, desc))
+        .collect()
 }
 
 /// True when the device presents an Android MTP (Media Transfer Protocol) signature.
@@ -335,10 +527,13 @@ pub fn report_mtp_detection() -> Result<()> {
 
 /// True when the device presents a Qualcomm EDL / 9008 (Sahara or Firehose) signature.
 pub fn is_edl_device(desc: &DeviceDescriptor) -> bool {
-    matches!(
-        (desc.vendor_id(), desc.product_id()),
-        (0x05c6, 0x9008) | (0x05c6, 0x9006) | (0x05c6, 0x9091) | (0x05c6, 0x90b8)
-    )
+    is_edl_device_ids(desc.vendor_id(), desc.product_id())
+}
+
+fn is_edl_device_ids(vid: u16, pid: u16) -> bool {
+    exact_signature(vid, pid)
+        .map(|s| s.kind == UsbKind::QualcommEdl)
+        .unwrap_or(false)
 }
 
 /// Structured description of a detected EDL device.
@@ -429,49 +624,53 @@ fn phone_vendor(vid: u16) -> bool {
 }
 
 /// JSON representation of the current USB device list — used by the bridge.
-/// Manufacturer and product strings are read only for phone vendors. Opening
-/// every hub and keyboard on Windows stalls the scan.
+///
+/// `platform` is the family name the desktop pages match (`MediaTek`,
+/// `Qualcomm`, `Samsung`, `Apple`, `Android`). `mode` / `repair_mode` describe
+/// how the device is connected. Serial, product, and manufacturer come from
+/// the USB string descriptor when the host allows that read.
 pub fn devices_as_json() -> Result<Vec<Value>> {
     let mut out = Vec::new();
-    for (d, desc) in enumerate() {
-        let readable = classify(&desc).is_some() || phone_vendor(desc.vendor_id());
-        let (manufacturer, product) = if readable {
-            let handle = d.open().ok();
-            let manufacturer = handle
-                .as_ref()
-                .and_then(|h| h.read_manufacturer_string_ascii(&desc).ok());
-            let product = handle
-                .as_ref()
-                .and_then(|h| h.read_product_string_ascii(&desc).ok());
-            (manufacturer, product)
-        } else {
-            (None, None)
-        };
+    for dev in identities() {
         out.push(json!({
-            "bus": d.bus_number(),
-            "addr": d.address(),
-            "vid": format!("{:04x}", desc.vendor_id()),
-            "pid": format!("{:04x}", desc.product_id()),
-            "repair_mode": classify(&desc),
-            "manufacturer": manufacturer,
-            "product": product,
+            "bus": dev.bus,
+            "addr": dev.addr,
+            "vid": dev.vid,
+            "pid": dev.pid,
+            "manufacturer": blank_to_null(&dev.manufacturer),
+            "product": blank_to_null(&dev.product),
+            "serial": blank_to_null(&dev.serial),
+            "bcd_device": dev.bcd_device,
+            "platform": dev.platform,
+            "brand": dev.brand,
+            "mode": dev.mode,
+            "repair_mode": dev.mode,
         }));
     }
     Ok(out)
 }
 
 pub fn list_devices() -> Result<()> {
-    let devices = enumerate();
+    let devices = identities();
     let mut shown = 0;
     let mut repair_targets = 0;
-    for (d, desc) in &devices {
+    for dev in &devices {
         shown += 1;
-        let line = fmt_device(d, desc);
-        if let Some(tag) = classify(desc) {
+        let line = format!(
+            "  bus {:>3} · addr {:>3} | {} {} | {} {} | sn {}",
+            dev.bus,
+            dev.addr,
+            dev.vid,
+            dev.pid,
+            dev.manufacturer.dimmed(),
+            dev.product,
+            dev.serial,
+        );
+        if let Some(tag) = dev.mode {
             repair_targets += 1;
-            println!("{}", format!("{}  ← {}", line, tag).bright_green().bold());
+            println!("{}", format!("{line}  ← {tag}").bright_green().bold());
         } else {
-            println!("{}", line);
+            println!("{line}");
         }
     }
     println!();
@@ -533,6 +732,41 @@ fn collect_keys() -> std::collections::HashSet<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn repair_modes_map_to_read_kinds() {
+        let mtk = exact_signature(0x0e8d, 0x2000).unwrap();
+        assert_eq!(mtk.platform, "MediaTek");
+        assert_eq!(mtk.kind, UsbKind::Mtk);
+
+        let edl = exact_signature(0x05c6, 0x9008).unwrap();
+        assert_eq!(edl.platform, "Qualcomm");
+        assert_eq!(edl.kind, UsbKind::QualcommEdl);
+
+        let download = exact_signature(0x04e8, 0x685d).unwrap();
+        assert_eq!(download.platform, "Samsung");
+        assert_eq!(download.kind, UsbKind::SamsungDownload);
+
+        let dfu = exact_signature(0x05ac, 0x1227).unwrap();
+        assert_eq!(dfu.platform, "Apple");
+        assert_eq!(dfu.kind, UsbKind::AppleDfu);
+
+        let phone = exact_signature(0x05ac, 0x12a8).unwrap();
+        assert_eq!(phone.kind, UsbKind::AppleNormal);
+    }
+
+    #[test]
+    fn apple_accessories_are_not_phones() {
+        assert!(exact_signature(0x05ac, 0x024f).is_none());
+        assert!(signature(0x05ac, 0x024f).is_none());
+    }
+
+    #[test]
+    fn diagnostic_pid_is_not_edl() {
+        assert!(!is_edl_device_ids(0x05c6, 0x900e));
+        assert!(is_edl_device_ids(0x05c6, 0x9008));
+        assert!(is_edl_device_ids(0x05c6, 0x676c));
+    }
 
     #[test]
     fn windows_wpd_name_fills_a_blank_libusb_row() {

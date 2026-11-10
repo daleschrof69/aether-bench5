@@ -16,7 +16,7 @@ const SUPPORTED = [
 const SOC = ["A12", "A13", "A14", "A15", "A16", "A17 Pro", "A18", "A18 Pro"];
 
 const IPHONE_ACTIONS = [
-  { key: "read_info",         label: "Modern Diagnostic", icon: Activity,     cost: "Free", danger: false, desc: "Full hardware fingerprint + trust-cache audit.", testid: "iphone-action-diag" },
+  { key: "diag_identity",     label: "Modern Diagnostic", icon: Activity,     cost: "Free", danger: false, desc: "Read model, serial, and firmware from DFU, Recovery, or a trusted connection.", testid: "iphone-action-diag" },
   { key: "icloud_check",      label: "Activation Probe",  icon: Search,       cost: "Free",  danger: false, desc: "Detect Activation Lock / iCloud status (read-only).", testid: "iphone-action-probe" },
   { key: "passcode_recover",  label: "Passcode Recovery", icon: Lock,         cost: "Free", danger: false, desc: "Brute-tolerant recovery flow via DFU pipeline.", testid: "iphone-action-passcode" },
   { key: "trust_audit",       label: "Trust Cache Audit", icon: ShieldCheck,  cost: "Free", danger: false, desc: "Verify SecureROM signatures vs Apple ground-truth.", testid: "iphone-action-trust" },

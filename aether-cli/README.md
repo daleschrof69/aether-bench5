@@ -36,9 +36,18 @@ will be small (~3–4 MB) and fast.
 
 ```bash
 ./target/release/aether-cli devices
+./target/release/aether-cli info                 # identity of the attached device
+./target/release/aether-cli info 04e8:685d       # one device, by USB id
+./target/release/aether-cli diag status
+./target/release/aether-cli diag firmware
+./target/release/aether-cli diag battery
+./target/release/aether-cli diag storage
+./target/release/aether-cli info --dry-run --json --no-banner
 ./target/release/aether-cli scan         # watch hot-plug events
 ./target/release/aether-cli serve        # start the WebSocket bridge
 ```
+
+`info` and `diag` are read-only. They exit with status 2 when no supported device is attached. Add `--json` for a single JSON object. Which fields each connection can and cannot provide is listed in [DIAGNOSTICS.md](DIAGNOSTICS.md).
 
 ---
 
@@ -48,7 +57,8 @@ will be small (~3–4 MB) and fast.
 | --- | --- | --- |
 | `devices` | ✅ real | List all attached USB devices, highlight known repair-mode signatures. |
 | `scan` | ✅ real | Continuously watch for hot-plug attach / detach events. |
-| `info <port>` |  ✅ real | Read chipset, IMEI, serial from the target. |
+| `info [selector]` | ✅ read-only | Serial, model, firmware/build, and other identity fields for the attached Samsung, Apple, MediaTek, or Qualcomm device. |
+| `diag status\|identity\|firmware\|battery\|storage` | ✅ read-only | Same read, limited to one section. `status` lists connections without a firmware query. |
 | `bypass-frp <port>` | ✅ real | MTK BROM / Qualcomm EDL Factory Reset Protection bypass. |
 | `repair-imei <port> --imei1 <I> [--imei2 <I>]` | ✅ real | Write IMEI(s) to modem NV partition. Luhn-validated. |
 | `unlock-bootloader <port>` | ✅ real| OEM bootloader unlock. **Destructive** — erases userdata. |

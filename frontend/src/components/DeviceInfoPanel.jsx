@@ -43,6 +43,8 @@ export const DeviceInfoPanel = () => {
         <Row label="Model" value={device?.model} highlight />
         <Row label="Kind" value={device?.kind} />
         <Row label="Platform" value={device?.platform} />
+        <Row label="Firmware" value={device?.firmware} />
+        <Row label="Battery" value={device?.battery} />
         <Row label="IMEI 1" value={device?.imei_masked} />
         <Row label="IMEI 2" value={device?.imei2_masked} />
         <Row label="Serial Number" value={device?.serial} />

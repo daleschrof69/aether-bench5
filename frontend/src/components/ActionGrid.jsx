@@ -186,7 +186,7 @@ export const QC_ACTIONS = [
 ];
 
 export const IPHONE_ACTIONS = [
-  { key: "apple_info",        label: "Modern Diagnostic",  icon: "Activity",     danger: false, testid: "iphone-action-diag",     cost: "Free" },
+  { key: "diag_identity",     label: "Modern Diagnostic",  icon: "Activity",     danger: false, testid: "iphone-action-diag",     cost: "Free" },
   { key: "icloud_check",      label: "Activation Probe",   icon: "Search",       danger: false, testid: "iphone-action-probe",    cost: "Free" },
   { key: "hello_screen_bypass", label: "Hello Screen Bypass (pwned-DFU)", icon: "Smartphone", danger: false, testid: "iphone-action-hello", cost: "Free" },
   { key: "sim_unlock",        label: "SIM / Network Unlock", icon: "Signal",     danger: false, testid: "iphone-action-sim",     cost: "Free" },
