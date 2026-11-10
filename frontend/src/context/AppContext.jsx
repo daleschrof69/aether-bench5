@@ -61,6 +61,7 @@ const BRIDGE_METHODS = {
   // Apple (libimobiledevice). Recovery query, lockdown info, diagnostics, and
   // an Apple-signed erase restore. None of these skip Activation Lock.
   apple_info:             { method: "apple.read_info" },
+  diag_identity:          { method: "diag.read", params: { section: "identity" } },
   icloud_check:           { method: "apple.read_info" },
   apple_lockdown:         { method: "apple.lockdown_info" },
   apple_diagnostics:      { method: "apple.diagnostics" },
@@ -110,6 +111,7 @@ export const AppProvider = ({ children }) => {
   const [setupOpen, setSetupOpen] = useState(false);
   const [imeiModalOpen, setImeiModalOpen] = useState(false);
   const timersRef = useRef([]);
+  const scanGen = useRef(0);
   const chargingRef = useRef(false);
   useEffect(() => {
     if (user && typeof user === "object" && typeof user.credits === "number") {
@@ -139,11 +141,52 @@ export const AppProvider = ({ children }) => {
     timersRef.current = [];
   }, []);
 
+  const maskImei = (imei) => {
+    const digits = String(imei || "").replace(/\D/g, "");
+    if (digits.length < 8) return "";
+    return `${digits.slice(0, 2)}•••••••${digits.slice(-4)}`;
+  };
+
+  const applyIdentityReport = (prev, report) => {
+    if (!prev || !report || report.report !== "identity") return prev;
+    const next = { ...prev };
+    const fill = (key, value) => {
+      if (value && value !== "—") next[key] = value;
+    };
+    fill("platform", report.platform);
+    fill("brand", report.brand);
+    fill("model", report.model);
+    fill("serial", report.serial);
+    fill("firmware", report.firmware);
+    fill("battery", report.battery);
+    fill("cpuId", report.chipset);
+    fill("storage", report.storage);
+    if (report.firmware && (!next.os || next.os === "—")) next.os = report.firmware;
+    if (report.connection && (!next.bootloader || next.bootloader === "—")) {
+      next.bootloader = report.connection;
+    }
+    const fields = report.fields || {};
+    if (fields.android_version) next.android = fields.android_version;
+    if (fields.security_patch) next.patch = fields.security_patch;
+    const masked = maskImei(fields.imei);
+    if (masked) {
+      next.imei = masked;
+      next.imei_masked = masked;
+    }
+    const masked2 = maskImei(fields.imei2);
+    if (masked2) {
+      next.imei2 = masked2;
+      next.imei2_masked = masked2;
+    }
+    return next;
+  };
+
   // Real device scan via the local Aether CLI bridge (libusb enumeration on the
   // host). No simulation: if the bridge is offline we tell the user how to
   // bring it online instead of inventing a fake device.
   const startSearch = useCallback(async (hint) => {
     clearTimers();
+    const generation = ++scanGen.current;
     setStatus("searching");
     setDevice(null);
     setComPort(null);
@@ -169,6 +212,7 @@ export const AppProvider = ({ children }) => {
           return { phones: [] };
         }),
       ]);
+      if (scanGen.current !== generation) return;
       const list = Array.isArray(res?.devices) ? res.devices : [];
       const classified = list.map((raw) => ({ raw, ...platformFromDevice(raw) }));
       const phones = Array.isArray(identified?.phones) ? identified.phones : [];
@@ -207,7 +251,9 @@ export const AppProvider = ({ children }) => {
             platform: phone.platform || target?.platform || "Android",
             kind: phone.kind || "phone",
             imei: "—", imei_masked: "—", imei2: "—", imei2_masked: "—",
-            serial: phone.serial || "—",
+            serial: phone.serial || target?.raw?.serial || "—",
+            firmware: "—",
+            battery: "—",
             bootloader: phone.build || target?.mode || "—",
             cpuId: phone.cpu || "—", storage: "—", ram: "—",
             region: phone.region || "—",
@@ -225,7 +271,9 @@ export const AppProvider = ({ children }) => {
             platform: target.platform,
             kind: target.repair ? "repair" : "usb",
             imei: "—", imei_masked: "—", imei2: "—", imei2_masked: "—",
-            serial: "—",
+            serial: target.raw?.serial && target.raw.serial !== "—" ? target.raw.serial : "—",
+            firmware: "—",
+            battery: "—",
             bootloader: target.mode || "Interface mode",
             cpuId: "—", storage: "—", ram: "—", region: "—",
             vid: target.raw.vid, pid: target.raw.pid,
@@ -248,7 +296,47 @@ export const AppProvider = ({ children }) => {
         pushLog("INFO", `${dev.platform} repair mode is available for this device.`);
       }
       toast.success(`Connected · ${dev.model}`, { description: `${dev.brand} · ${dev.os && dev.os !== "—" ? dev.os : dev.platform}` });
+
+      const knownUsb = target && target.platform && target.platform !== "Unknown";
+      const selector = phone?.serial && phone.serial !== "—"
+        ? phone.serial
+        : knownUsb && target.raw?.vid && target.raw?.pid
+          ? `${target.raw.vid}:${target.raw.pid}`
+          : "auto";
+      if (typeof cliBridge.runJob === "function" && (phone || knownUsb)) {
+        pushLog("INFO", "Reading serial, model, and firmware ...");
+        cliBridge
+          .runJob("diag.read", { port: selector, section: "identity" }, (ev) => {
+            if (scanGen.current !== generation) return;
+            const line = ev?.line || "";
+            if (line.startsWith("AETHER_DIAG ")) {
+              try {
+                const report = JSON.parse(line.slice("AETHER_DIAG ".length));
+                setDevice((prev) => applyIdentityReport(prev, report));
+                if (report.ok) {
+                  pushLog(
+                    "SUCCESS",
+                    `Identity · ${report.model || dev.model} · serial ${report.serial || "n/a"} · firmware ${report.firmware || "n/a"}`
+                  );
+                }
+              } catch (err) {
+                pushLog("WARN", `Identity report could not be parsed: ${err?.message || err}`);
+              }
+              return;
+            }
+            if (ev.stream === "stdout" && line && !line.startsWith("AETHER_DIAG")) pushLog("INFO", line);
+            else if (ev.stream === "stderr" && line) pushLog("WARN", line);
+            else if (ev.stream === "done" && ev.exit_code && ev.exit_code !== 0) {
+              pushLog("ERROR", `Identity read failed (exit ${ev.exit_code}).`);
+            }
+          })
+          .catch((err) => {
+            if (scanGen.current !== generation) return;
+            pushLog("ERROR", `Identity read failed: ${err?.message || err}`);
+          });
+      }
     } catch (e) {
+      if (scanGen.current !== generation) return;
       pushLog("ERROR", `Bridge device scan failed: ${e?.message || e}`);
       setStatus("idle");
     }
@@ -285,6 +373,7 @@ export const AppProvider = ({ children }) => {
 
   const disconnect = useCallback(() => {
     clearTimers();
+    scanGen.current += 1;
     pushLog("WARN", "Device disconnected by user.");
     setStatus("idle");
     setDevice(null);
@@ -297,6 +386,7 @@ export const AppProvider = ({ children }) => {
   // and classifies the connected device by VID/PID. Note: running full exploit
   // protocols still requires the native aether-cli bridge.
   const connectWebUsb = useCallback(async () => {
+    scanGen.current += 1;
     if (!webusb.supported) {
       pushLog("ERROR", "WebUSB unavailable — use Chrome, Edge or Opera on desktop.");
       return;
@@ -314,6 +404,8 @@ export const AppProvider = ({ children }) => {
         imei2: "N/A",
         imei2_masked: "N/A",
         serial: d.serial || "—",
+        firmware: "—",
+        battery: "—",
         bootloader: sig?.mode || "Interface mode",
         cpuId: "—",
         storage: "—",
@@ -342,7 +434,7 @@ export const AppProvider = ({ children }) => {
       } else {
         pushLog("WARN", `Unrecognized USB vendor ${d.vidHex}:${d.pidHex}. Put the device in a known repair mode and retry.`);
       }
-      pushLog("INFO", "Note: full exploit I/O runs through the Aether CLI bridge.");
+      pushLog("INFO", "USB descriptors do not include the firmware build. Scan with the CLI bridge for a protocol identity read.");
     } catch (e) {
       if (e?.name === "NotFoundError") {
         pushLog("WARN", "WebUSB: no device selected.");
@@ -432,9 +524,19 @@ export const AppProvider = ({ children }) => {
 
         cliBridge
           .runJob(bridgeMap.method, { ...(bridgeMap.params || {}), ...params }, (ev) => {
-            if (ev.stream === "stdout" && ev.line) {
-              pushLog("INFO", ev.line);
-            } else if (ev.stream === "stderr" && ev.line) {
+            const line = ev?.line || "";
+            if (line.startsWith("AETHER_DIAG ")) {
+              try {
+                const report = JSON.parse(line.slice("AETHER_DIAG ".length));
+                setDevice((prev) => applyIdentityReport(prev, report));
+              } catch (err) {
+                pushLog("WARN", `Identity report could not be parsed: ${err?.message || err}`);
+              }
+              return;
+            }
+            if (ev.stream === "stdout" && line) {
+              pushLog("INFO", line);
+            } else if (ev.stream === "stderr" && line) {
               pushLog("WARN", ev.line);
             } else if (ev.stream === "done") {
               if (ev.exit_code === 0) {

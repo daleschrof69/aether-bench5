@@ -172,3 +172,19 @@ pub async fn pwn_dfu_streaming(tx: UnboundedSender<StreamLine>) -> Result<i32> {
     let bin = find_gaster()?;
     run_streaming(&bin, &["pwn"], tx).await
 }
+
+/// `irecovery` binary, if libimobiledevice's recovery tools are installed.
+pub fn irecovery_bin() -> Result<String> {
+    find_irecovery()
+}
+
+/// Read-only lockdown query from the same libimobiledevice suite as irecovery.
+/// Used for a trusted normal-mode iPhone. DFU and Recovery use `irecovery -q`.
+pub fn ideviceinfo_bin() -> Result<String> {
+    find_named(&["ideviceinfo", "ideviceinfo.exe"])
+}
+
+/// Lists UDIDs of paired or trusted iPhones. Read-only.
+pub fn idevice_id_bin() -> Result<String> {
+    find_named(&["idevice_id", "idevice_id.exe"])
+}
