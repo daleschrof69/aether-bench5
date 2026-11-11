@@ -39,6 +39,7 @@
   },
   "bundle": {
     "active": true,
+    "resources": ["../../tr4mpass"],
     "targets": ["msi", "nsis", "deb", "appimage", "dmg"],
     "category": "DeveloperTool",
     "shortDescription": "Aether Repair Tool — MTK / Qualcomm / iPhone / Samsung repair console.",
