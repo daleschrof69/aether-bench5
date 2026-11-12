@@ -1,3 +1,7 @@
+import argparse
+import json
+
+
 def emulate() -> dict:
     """Return a deterministic session using only synthetic device information."""
     events = [
@@ -32,7 +36,9 @@ def emulate() -> dict:
         "emulation_enabled": True,
         "hardware_accessed": False,  # Ensure this is False to match the docstring
         "events": events,
-    }def emulate() -> dict:
+    }
+
+def emulate() -> dict:
     """Return a deterministic session using only synthetic device information."""
     events = [
         {"event": "emulation.started", "message": "Emulation is enabled; hardware access remains off."},

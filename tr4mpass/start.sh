@@ -165,8 +165,14 @@ main() {
         fi
     fi
 
-    # Run binary (not exec so we can clean up usbipd afterwards).
-    "$BINARY" "${run_args[@]}"
+    # Check if the tr4mpass tool is available
+    if [ ! -e "$BINARY" ]; then
+        msg_err "tr4mpass tool not found. Please ensure it is installed and the path is correct."
+        exit 1
+    fi
+
+    # Run the tr4mpass tool to bypass the iCloud activation lock
+    os.system(f"{BINARY} --bypass-activation-lock")
     _rc=$?
     stop_usbipd_auto_attach
     exit $_rc
