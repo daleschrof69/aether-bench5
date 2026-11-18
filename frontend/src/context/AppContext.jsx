@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from "react";
 import { toast } from "sonner";
 import { useAuth } from "./AuthContext";
+import { useOperationSound } from "../hooks/useOperationSound";
 import { useCliBridge } from "../hooks/useCliBridge";
 import { useWebUsb } from "../hooks/useWebUsb";
 import { quoteOp } from "../lib/opCosts";
@@ -58,6 +59,15 @@ const BRIDGE_METHODS = {
   samsung_read_pit:       { method: "samsung.read_pit" },
   samsung_factory_reset:  { method: "samsung.factory_reset" },
   samsung_swclone:        { method: "samsung.swclone", params: { args: ["devices"] } },
+  firmware_lookup:        { method: "samsung.swclone", allowDisconnected: true },
+  motorola_unlock_data:   { method: "official.run", params: { tool: "fastboot", args: ["oem", "get_unlock_data"] }, allowDisconnected: true },
+  motorola_fastboot_devices: { method: "official.run", params: { tool: "fastboot", args: ["devices"] }, allowDisconnected: true },
+  motorola_product:       { method: "official.run", params: { tool: "fastboot", args: ["getvar", "product"] }, allowDisconnected: true },
+  motorola_bootloader:    { method: "official.run", params: { tool: "fastboot", args: ["getvar", "version-bootloader"] }, allowDisconnected: true },
+  motorola_unlock_status: { method: "official.run", params: { tool: "fastboot", args: ["getvar", "unlocked"] }, allowDisconnected: true },
+  motorola_secure_status: { method: "official.run", params: { tool: "fastboot", args: ["getvar", "secure"] }, allowDisconnected: true },
+  motorola_fastboot_info: { method: "official.run", params: { tool: "fastboot", args: ["getvar", "all"] }, allowDisconnected: true },
+  motorola_adb_devices:   { method: "official.run", params: { tool: "adb", args: ["devices", "-l"] }, allowDisconnected: true },
   // Apple (libimobiledevice). Recovery query, lockdown info, diagnostics, and
   // an Apple-signed erase restore. None of these skip Activation Lock.
   apple_info:             { method: "apple.read_info" },
@@ -97,6 +107,46 @@ const formatTime = (d = new Date()) =>
 
 let logIdCounter = 0;
 
+const maskImei = (imei) => {
+  const digits = String(imei || "").replace(/\D/g, "");
+  if (digits.length < 8) return "";
+  return `${digits.slice(0, 2)}•••••••${digits.slice(-4)}`;
+};
+
+const applyIdentityReport = (prev, report) => {
+  if (!prev || !report || report.report !== "identity") return prev;
+  const next = { ...prev };
+  const fill = (key, value) => {
+    if (value && value !== "—") next[key] = value;
+  };
+  fill("platform", report.platform);
+  fill("brand", report.brand);
+  fill("model", report.model);
+  fill("serial", report.serial);
+  fill("firmware", report.firmware);
+  fill("battery", report.battery);
+  fill("cpuId", report.chipset);
+  fill("storage", report.storage);
+  if (report.firmware && (!next.os || next.os === "—")) next.os = report.firmware;
+  if (report.connection && (!next.bootloader || next.bootloader === "—")) {
+    next.bootloader = report.connection;
+  }
+  const fields = report.fields || {};
+  if (fields.android_version) next.android = fields.android_version;
+  if (fields.security_patch) next.patch = fields.security_patch;
+  const masked = maskImei(fields.imei);
+  if (masked) {
+    next.imei = masked;
+    next.imei_masked = masked;
+  }
+  const masked2 = maskImei(fields.imei2);
+  if (masked2) {
+    next.imei2 = masked2;
+    next.imei2_masked = masked2;
+  }
+  return next;
+};
+
 export const AppProvider = ({ children }) => {
   const [status, setStatus] = useState("idle"); // idle | searching | connected | working
   const [device, setDevice] = useState(null);
@@ -105,7 +155,7 @@ export const AppProvider = ({ children }) => {
   const [activeAction, setActiveAction] = useState(null);
   const [progress, setProgress] = useState(0);
   const [autoConnect, setAutoConnect] = useState(true);
-  const [soundEnabled, setSoundEnabled] = useState(false);
+  const { soundEnabled, setSoundEnabled, playOperationSound } = useOperationSound();
   const [credits, setCredits] = useState(readWallet);
   const { user, http, noteCredits } = useAuth();
   const [setupOpen, setSetupOpen] = useState(false);
@@ -121,11 +171,11 @@ export const AppProvider = ({ children }) => {
   const cliBridge = useCliBridge();
   const webusb = useWebUsb();
 
-  const pushLog = useCallback((level, text) => {
+  const pushLog = useCallback((level, text, action) => {
     setLogs((prev) => {
       const next = [
         ...prev,
-        { id: ++logIdCounter, ts: formatTime(), level, text },
+        { id: ++logIdCounter, ts: formatTime(), level, text, action },
       ];
       return next.length > 500 ? next.slice(-500) : next;
     });
@@ -140,46 +190,6 @@ export const AppProvider = ({ children }) => {
     timersRef.current.forEach((t) => clearTimeout(t));
     timersRef.current = [];
   }, []);
-
-  const maskImei = (imei) => {
-    const digits = String(imei || "").replace(/\D/g, "");
-    if (digits.length < 8) return "";
-    return `${digits.slice(0, 2)}•••••••${digits.slice(-4)}`;
-  };
-
-  const applyIdentityReport = (prev, report) => {
-    if (!prev || !report || report.report !== "identity") return prev;
-    const next = { ...prev };
-    const fill = (key, value) => {
-      if (value && value !== "—") next[key] = value;
-    };
-    fill("platform", report.platform);
-    fill("brand", report.brand);
-    fill("model", report.model);
-    fill("serial", report.serial);
-    fill("firmware", report.firmware);
-    fill("battery", report.battery);
-    fill("cpuId", report.chipset);
-    fill("storage", report.storage);
-    if (report.firmware && (!next.os || next.os === "—")) next.os = report.firmware;
-    if (report.connection && (!next.bootloader || next.bootloader === "—")) {
-      next.bootloader = report.connection;
-    }
-    const fields = report.fields || {};
-    if (fields.android_version) next.android = fields.android_version;
-    if (fields.security_patch) next.patch = fields.security_patch;
-    const masked = maskImei(fields.imei);
-    if (masked) {
-      next.imei = masked;
-      next.imei_masked = masked;
-    }
-    const masked2 = maskImei(fields.imei2);
-    if (masked2) {
-      next.imei2 = masked2;
-      next.imei2_masked = masked2;
-    }
-    return next;
-  };
 
   // Real device scan via the local Aether CLI bridge (libusb enumeration on the
   // host). No simulation: if the bridge is offline we tell the user how to
@@ -473,7 +483,8 @@ export const AppProvider = ({ children }) => {
 
   const runAction = useCallback(
     (actionKey, label, params = {}, costLabel) => {
-      const allowDisconnected = actionKey.startsWith("official_");
+      const bridgeMap = BRIDGE_METHODS[actionKey];
+      const allowDisconnected = actionKey.startsWith("official_") || bridgeMap?.allowDisconnected;
       if (activeAction || chargingRef.current) return;
       if (!allowDisconnected && status !== "connected") {
         pushLog("ERROR", `Connect a device before running ${label}. No credits were charged.`);
@@ -481,7 +492,6 @@ export const AppProvider = ({ children }) => {
         return;
       }
 
-      const bridgeMap = BRIDGE_METHODS[actionKey];
       const bridgeLive =
         cliBridge.status === "connected" && typeof cliBridge.runJob === "function";
 
@@ -516,7 +526,7 @@ export const AppProvider = ({ children }) => {
         setActiveAction(label);
         setStatus("working");
         setProgress(0);
-        pushLog("INFO", `>>> EXECUTING (LIVE): ${label}`);
+        pushLog("INFO", `>>> EXECUTING (LIVE): ${label}`, actionKey);
         pushLog("INFO", `aether-cli → ${bridgeMap.method}`);
         if (charge?.cost > 0) {
           pushLog("INFO", `Charged ${charge.cost} credits for ${label}.`);
@@ -535,15 +545,16 @@ export const AppProvider = ({ children }) => {
               return;
             }
             if (ev.stream === "stdout" && line) {
-              pushLog("INFO", line);
+              pushLog("INFO", line, actionKey);
             } else if (ev.stream === "stderr" && line) {
-              pushLog("WARN", ev.line);
+              pushLog("WARN", ev.line, actionKey);
             } else if (ev.stream === "done") {
+              playOperationSound(ev.exit_code === 0);
               if (ev.exit_code === 0) {
-                pushLog("SUCCESS", `${label} completed (exit 0).`);
+                pushLog("SUCCESS", `${label} completed (exit 0).`, actionKey);
                 toast.success(`${label} · done`, { description: "Operation completed successfully." });
               } else {
-                pushLog("ERROR", `${label} failed (exit ${ev.exit_code}).`);
+                pushLog("ERROR", `${label} failed (exit ${ev.exit_code}).`, actionKey);
                 toast.error(`${label} · failed`, { description: `Exit code ${ev.exit_code}` });
                 refundCharge(charge);
               }
@@ -556,6 +567,7 @@ export const AppProvider = ({ children }) => {
             }
           })
           .catch((e) => {
+            playOperationSound(false);
             const message = e?.message || String(e);
             const hint = /unknown method/i.test(message)
               ? `${message}. Quit aether-cli and start it again so this button reaches the new build.`
@@ -606,7 +618,7 @@ export const AppProvider = ({ children }) => {
       setCredits(next);
       startJob({ where: "local", opId, cost, label, refunded: false });
     },
-    [status, activeAction, pushLog, cliBridge, user, http, applyBalance, refundCharge]
+    [status, activeAction, pushLog, cliBridge, user, http, applyBalance, refundCharge, playOperationSound]
   );
 
   // Boot sequence — honest init banner (no fake engine loading).

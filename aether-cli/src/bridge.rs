@@ -86,7 +86,15 @@ pub async fn serve(addr: &str) -> Result<()> {
         let (sock, peer) = listener.accept().await?;
         println!("  {} client connected: {}", "+".bright_green(), peer);
         tokio::spawn(async move {
-            match tokio_tungstenite::accept_async(sock).await {
+            let token = std::env::var("AETHER_BRIDGE_TOKEN").ok();
+            let origin = std::env::var("AETHER_BRIDGE_ORIGIN").ok();
+            match tokio_tungstenite::accept_hdr_async(sock, move |request: &tokio_tungstenite::tungstenite::handshake::server::Request, response| {
+                if !desktop_handshake_allowed(request, token.as_deref(), origin.as_deref()) {
+                    return Err(tokio_tungstenite::tungstenite::http::Response::builder()
+                        .status(403).body(Some("Desktop bridge authentication required".into())).unwrap());
+                }
+                Ok(response)
+            }).await {
                 Ok(ws) => handle_client(ws).await,
                 Err(e) => eprintln!("  ws handshake failed: {}", e),
             }
@@ -723,5 +731,38 @@ async fn dispatch(method: &str, params: &Value, write: &WsSink) -> Result<Value,
         },
 
         other => Err(format!("unknown method: {}", other)),
+    }
+}
+
+
+fn desktop_handshake_allowed(
+    request: &tokio_tungstenite::tungstenite::handshake::server::Request,
+    token: Option<&str>, origin: Option<&str>,
+) -> bool {
+    let Some(token) = token else { return true }; // Standalone CLI compatibility.
+    let supplied = request.uri().query().unwrap_or("").split('&')
+        .find_map(|part| part.strip_prefix("token="));
+    if token.is_empty() || supplied != Some(token) { return false }
+    match request.headers().get("origin") {
+        Some(value) => value.to_str().ok() == origin,
+        None => true, // Authenticated native diagnostic clients.
+    }
+}
+
+#[cfg(test)]
+mod desktop_auth_tests {
+    use super::*;
+    use tokio_tungstenite::tungstenite::http::Request;
+    #[test]
+    fn desktop_bridge_requires_token_and_matching_browser_origin() {
+        for (uri, origin, allowed) in [
+            ("/?token=test", "http://127.0.0.1:1234", true),
+            ("/", "http://127.0.0.1:1234", false),
+            ("/?token=wrong", "http://127.0.0.1:1234", false),
+            ("/?token=test", "https://example.invalid", false),
+        ] {
+            let request = Request::builder().uri(uri).header("Origin", origin).body(()).unwrap();
+            assert_eq!(desktop_handshake_allowed(&request, Some("test"), Some("http://127.0.0.1:1234")), allowed);
+        }
     }
 }

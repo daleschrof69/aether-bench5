@@ -11,13 +11,14 @@ import uuid
 import asyncio
 import tempfile
 import zipfile
+import secrets
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 
 import bcrypt
 import jwt as pyjwt
 from fastapi import FastAPI, APIRouter, Request, Response, HTTPException, Depends
-from fastapi.responses import JSONResponse, FileResponse
+from fastapi.responses import JSONResponse, FileResponse, RedirectResponse
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
 from pydantic import BaseModel, EmailStr, Field
@@ -27,14 +28,8 @@ import httpx
 
 from op_pricing import quote_op
 
-try:
-    from emergentintegrations.payments.stripe.checkout import (
-        StripeCheckout,
-        CheckoutSessionRequest,
-    )
-except ImportError:  # health/version must boot without the Emergent payments SDK
-    StripeCheckout = None
-    CheckoutSessionRequest = None
+from payments import StripeCheckout, CheckoutSessionRequest, verify_webhook
+import google_auth
 
 # ────────────────────────────────────────────────────────────────────────────
 # Configuration
@@ -43,10 +38,9 @@ JWT_SECRET = os.environ["JWT_SECRET"]
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_TTL_MIN = 60 * 24  # 1 day for desktop-app feel
 REFRESH_TOKEN_TTL_DAYS = 7
-EMERGENT_SESSION_TTL_DAYS = 7
 
 STRIPE_API_KEY = os.environ.get("STRIPE_API_KEY", "")
-EMERGENT_SESSION_DATA_URL = "https://demobackend.emergentagent.com/auth/v1/env/oauth/session-data"
+STRIPE_WEBHOOK_SECRET = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
 
 # CORS allowlist — explicit origins only. Credentialed CORS cannot use a wildcard.
 CORS_ORIGINS = [o.strip() for o in os.environ.get("CORS_ORIGINS", "").split(",") if o.strip()]
@@ -73,10 +67,14 @@ PRICING_TIERS = {
     "credits_wholesale":{"amount": 499.00, "label": "Wholesale · +2000 credits",        "grant_plan": None,               "grant_credits": 2000},
 }
 
-# MongoDB
-mongo_url = os.environ["MONGO_URL"]
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ["DB_NAME"]]
+# Desktop installations use a local SQLite file; hosted installations retain MongoDB.
+if os.environ.get("AETHER_SQLITE_PATH"):
+    from sqlite_store import SQLiteStore
+    client = db = SQLiteStore(os.environ["AETHER_SQLITE_PATH"])
+else:
+    mongo_url = os.environ["MONGO_URL"]
+    client = AsyncIOMotorClient(mongo_url)
+    db = client[os.environ["DB_NAME"]]
 
 app = FastAPI()
 api_router = APIRouter(prefix="/api")
@@ -210,14 +208,14 @@ async def _resolve_session_token(token: str) -> Optional[Dict[str, Any]]:
 
 
 async def get_current_user(request: Request) -> Dict[str, Any]:
-    """Accepts JWT access_token cookie OR Emergent session_token cookie OR bearer header."""
+    """Accepts JWT access_token cookie OR legacy session_token cookie OR bearer header."""
     # 1. JWT access_token cookie
     tok = request.cookies.get("access_token")
     if tok:
         user = await _resolve_jwt(tok)
         if user:
             return user
-    # 2. Emergent session_token cookie
+    # 2. legacy session_token cookie
     sess = request.cookies.get("session_token")
     if sess:
         user = await _resolve_session_token(sess)
@@ -320,7 +318,7 @@ async def login(payload: LoginRequest, request: Request, response: Response):
 
 @api_router.post("/auth/logout")
 async def logout(request: Request, response: Response):
-    # If Emergent session, delete from DB
+    # Revoke a legacy session, if present
     st = request.cookies.get("session_token")
     if st:
         await db.user_sessions.delete_one({"session_token": st})
@@ -333,18 +331,51 @@ async def me(user=Depends(get_current_user)):
     return public_user(user)
 
 
-async def _fetch_emergent_profile(session_id: str) -> Dict[str, Any]:
-    """Call Emergent oauth data endpoint; validate response contract."""
-    async with httpx.AsyncClient(timeout=15) as http:
-        r = await http.get(EMERGENT_SESSION_DATA_URL, headers={"X-Session-ID": session_id})
-    if r.status_code != 200:
-        raise HTTPException(status_code=401, detail="Invalid session_id")
-    data = r.json()
-    email = (data.get("email") or "").lower().strip()
-    if not email:
-        raise HTTPException(status_code=400, detail="Email missing from oauth payload")
-    data["email"] = email
-    return data
+@api_router.get("/auth/providers")
+async def auth_providers():
+    return {"google": google_auth.configuration().enabled}
+
+
+@api_router.get("/auth/google")
+async def google_login():
+    config = google_auth.configuration()
+    if not config.enabled:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured. Use email and password.")
+    state, verifier = secrets.token_urlsafe(32), secrets.token_urlsafe(64)
+    signed = pyjwt.encode({"type": "google_oauth", "state": state, "verifier": verifier,
+                          "exp": datetime.now(timezone.utc) + timedelta(minutes=10)},
+                         JWT_SECRET, algorithm=JWT_ALGORITHM)
+    response = RedirectResponse(google_auth.authorization_url(config, state, verifier), status_code=302)
+    response.set_cookie("google_oauth", signed, httponly=True,
+                        secure=config.redirect_uri.startswith("https://"), samesite="lax",
+                        max_age=600, path="/api/auth/google")
+    return response
+
+
+@api_router.get("/auth/google/callback")
+async def google_callback(request: Request):
+    config = google_auth.configuration()
+    if not config.enabled:
+        raise HTTPException(status_code=503, detail="Google sign-in is not configured")
+    try:
+        flow = pyjwt.decode(request.cookies.get("google_oauth", ""), JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        if flow.get("type") != "google_oauth" or not secrets.compare_digest(
+                flow["state"], request.query_params.get("state", "")):
+            raise ValueError("Invalid OAuth state")
+        code = request.query_params.get("code")
+        if not code:
+            raise ValueError("Google did not return an authorization code")
+    except (pyjwt.PyJWTError, KeyError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="Invalid or expired Google sign-in. Please try again.") from exc
+    try:
+        profile = await google_auth.exchange_code(config, code, flow["verifier"])
+    except (httpx.HTTPError, ValueError, KeyError) as exc:
+        raise HTTPException(status_code=401, detail="Unable to verify Google sign-in") from exc
+    user = await _upsert_google_user(profile)
+    response = RedirectResponse(f"{config.app_origin}/", status_code=302)
+    response.delete_cookie("google_oauth", path="/api/auth/google")
+    set_jwt_cookies(response, user["user_id"], user["email"], secure=config.app_origin.startswith("https://"))
+    return response
 
 
 async def _upsert_google_user(profile: Dict[str, Any]) -> Dict[str, Any]:
@@ -373,45 +404,15 @@ async def _upsert_google_user(profile: Dict[str, Any]) -> Dict[str, Any]:
     return user
 
 
-async def _persist_emergent_session(user: Dict[str, Any], session_token: str, response: Response, *, secure: bool) -> None:
-    """Insert user_sessions row and set the httpOnly session_token cookie."""
-    expires_at = (datetime.now(timezone.utc) + timedelta(days=EMERGENT_SESSION_TTL_DAYS)).isoformat()
-    await db.user_sessions.insert_one(
-        {
-            "user_id": user["user_id"],
-            "session_token": session_token,
-            "expires_at": expires_at,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-        }
-    )
-    response.set_cookie(
-        key="session_token",
-        value=session_token,
-        httponly=True,
-        secure=secure,
-        samesite="none" if secure else "lax",
-        max_age=EMERGENT_SESSION_TTL_DAYS * 86400,
-        path="/",
-    )
-
-
 @api_router.post("/auth/session")
-async def emergent_session_exchange(request: Request, response: Response):
-    """Exchange Emergent OAuth session_id for a session_token cookie."""
-    body = await request.json()
-    session_id = body.get("session_id") if isinstance(body, dict) else None
-    if not session_id:
-        raise HTTPException(status_code=400, detail="session_id required")
-    profile = await _fetch_emergent_profile(session_id)
-    user = await _upsert_google_user(profile)
-    await _persist_emergent_session(user, profile["session_token"], response, secure=_cookie_secure(request))
-    return public_user(user)
+async def retired_session_exchange():
+    raise HTTPException(status_code=410, detail="Hosted session exchange has been retired. Sign in again using Google or email.")
 
 
 # ────────────────────────────────────────────────────────────────────────────
 # Credits / profile helpers
 # ────────────────────────────────────────────────────────────────────────────
-async def _grant_purchase(user_id: str, tier_id: str) -> None:
+async def _grant_purchase(user_id: str, tier_id: str, session_id: str) -> None:
     tier = PRICING_TIERS.get(tier_id)
     if not tier:
         return
@@ -431,7 +432,12 @@ async def _grant_purchase(user_id: str, tier_id: str) -> None:
     if inc:
         op["$inc"] = inc
     if op:
-        await db.users.update_one({"user_id": user_id}, op)
+        # Credit and deduplication marker commit atomically in the same user document.
+        op["$addToSet"] = {"purchase_sessions": session_id}
+        result = await db.users.update_one(
+            {"user_id": user_id, "purchase_sessions": {"$ne": session_id}}, op)
+        if not result.matched_count and not await db.users.find_one({"user_id": user_id}):
+            raise HTTPException(status_code=409, detail="Purchase account no longer exists")
 
 
 class CreditSpendRequest(BaseModel):
@@ -517,11 +523,11 @@ async def refund_credits(payload: CreditRefundRequest, user=Depends(get_current_
     raise HTTPException(status_code=404, detail="No charged operation to refund")
 
 
-def _stripe_client(webhook_url: str):
-    """Build a Stripe client, or 503 when the payments SDK or key is absent."""
-    if StripeCheckout is None or not STRIPE_API_KEY:
+def _stripe_client():
+    """Use the official Stripe API with the operator's own key."""
+    if not STRIPE_API_KEY:
         raise HTTPException(status_code=503, detail="Stripe checkout is not configured")
-    return StripeCheckout(api_key=STRIPE_API_KEY, webhook_url=webhook_url)
+    return StripeCheckout(api_key=STRIPE_API_KEY)
 
 
 # ────────────────────────────────────────────────────────────────────────────
@@ -544,12 +550,11 @@ async def stripe_checkout(payload: CheckoutCreateRequest, request: Request, user
     origin = payload.origin_url.rstrip("/")
     success_url = f"{origin}/payment/success?session_id={{CHECKOUT_SESSION_ID}}"
     cancel_url = f"{origin}/payment/cancel"
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url.rstrip('/')}/api/webhook/stripe"
-    sc = _stripe_client(webhook_url)
+    sc = _stripe_client()
     req = CheckoutSessionRequest(
         amount=float(tier["amount"]),
         currency="usd",
+        label=tier["label"],
         success_url=success_url,
         cancel_url=cancel_url,
         metadata={"tier_id": payload.tier_id, "user_id": user["user_id"]},
@@ -580,9 +585,7 @@ async def stripe_status(session_id: str, request: Request, user=Depends(get_curr
         raise HTTPException(status_code=404, detail="Transaction not found")
     if txn["user_id"] != user["user_id"]:
         raise HTTPException(status_code=403, detail="Not your transaction")
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url.rstrip('/')}/api/webhook/stripe"
-    sc = _stripe_client(webhook_url)
+    sc = _stripe_client()
     s = None  # silence "possibly unbound" warnings from static analysers
     try:
         s = await sc.get_checkout_status(session_id)
@@ -599,18 +602,7 @@ async def stripe_status(session_id: str, request: Request, user=Depends(get_curr
         }
     new_payment_status = s.payment_status
     new_status = s.status
-    # Idempotent fulfillment
-    if not txn.get("fulfilled") and new_payment_status == "paid":
-        await _grant_purchase(user["user_id"], txn["tier_id"])
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {"status": new_status, "payment_status": new_payment_status, "fulfilled": True}},
-        )
-    elif txn.get("payment_status") != new_payment_status or txn.get("status") != new_status:
-        await db.payment_transactions.update_one(
-            {"session_id": session_id},
-            {"$set": {"status": new_status, "payment_status": new_payment_status}},
-        )
+    await _reconcile_purchase(txn, s.amount_total, s.currency, new_status, new_payment_status)
     updated_user = await db.users.find_one({"user_id": user["user_id"]}, {"_id": 0, "password_hash": 0})
     return {
         "status": new_status,
@@ -621,29 +613,36 @@ async def stripe_status(session_id: str, request: Request, user=Depends(get_curr
     }
 
 
+async def _reconcile_purchase(txn, amount_total, currency, status, payment_status):
+    if txn.get("fulfilled"):
+        return
+    if payment_status == "paid":
+        from decimal import Decimal
+        expected = int(Decimal(str(txn["amount"])) * 100)
+        if amount_total != expected or currency != txn["currency"]:
+            raise HTTPException(status_code=400, detail="Payment amount or currency does not match transaction")
+        await _grant_purchase(txn["user_id"], txn["tier_id"], txn["session_id"])
+    await db.payment_transactions.update_one(
+        {"session_id": txn["session_id"], "fulfilled": {"$ne": True}},
+        {"$set": {"status": status, "payment_status": payment_status,
+                  **({"fulfilled": True} if payment_status == "paid" else {})}},
+    )
+
+
 @api_router.post("/webhook/stripe")
 async def stripe_webhook(request: Request):
-    body = await request.body()
-    sig = request.headers.get("Stripe-Signature", "")
-    host_url = str(request.base_url)
-    webhook_url = f"{host_url.rstrip('/')}/api/webhook/stripe"
-    if StripeCheckout is None or not STRIPE_API_KEY:
-        logger.warning("Stripe webhook ignored — checkout is not configured")
-        return JSONResponse(status_code=200, content={"received": True})
-    sc = _stripe_client(webhook_url)
+    if not STRIPE_WEBHOOK_SECRET:
+        raise HTTPException(status_code=503, detail="Stripe webhook is not configured")
     try:
-        evt = await sc.handle_webhook(body, sig)
-    except Exception as e:
-        logger.warning(f"Stripe webhook parse failed: {e}")
-        return JSONResponse(status_code=200, content={"received": True})
-    if evt.payment_status == "paid":
-        txn = await db.payment_transactions.find_one({"session_id": evt.session_id}, {"_id": 0})
-        if txn and not txn.get("fulfilled"):
-            await _grant_purchase(txn["user_id"], txn["tier_id"])
-            await db.payment_transactions.update_one(
-                {"session_id": evt.session_id},
-                {"$set": {"status": "complete", "payment_status": "paid", "fulfilled": True}},
-            )
+        event = verify_webhook(await request.body(), request.headers.get("Stripe-Signature", ""), STRIPE_WEBHOOK_SECRET)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid Stripe webhook") from exc
+    if event["type"] in ("checkout.session.completed", "checkout.session.async_payment_succeeded"):
+        session = event["data"]["object"]
+        txn = await db.payment_transactions.find_one({"session_id": session["id"]}, {"_id": 0})
+        if txn:
+            await _reconcile_purchase(txn, session.get("amount_total"), session.get("currency"),
+                                      session.get("status", "complete"), session.get("payment_status"))
     return {"received": True}
 
 
@@ -995,3 +994,49 @@ app.add_middleware(
 )
 
 app.include_router(api_router)
+
+
+# The packaged desktop API serves its own UI on loopback. Every route is bound
+# to a random per-launch credential; a browser on another site cannot use it.
+if os.environ.get("AETHER_DESKTOP_TOKEN"):
+    import json
+    from fastapi.responses import HTMLResponse
+    from fastapi.staticfiles import StaticFiles
+
+    desktop_token = os.environ["AETHER_DESKTOP_TOKEN"]
+    ui_root = Path(os.environ["AETHER_UI_ROOT"]).resolve()
+
+    @app.middleware("http")
+    async def desktop_access(request: Request, call_next):
+        origin = request.headers.get("origin")
+        if origin and origin != str(request.base_url).rstrip("/"):
+            return JSONResponse({"detail": "Desktop origin rejected"}, status_code=403)
+        token = request.cookies.get("desktop_key", "")
+        if request.headers.get("authorization", "").startswith("Desktop "):
+            token = request.headers["authorization"][8:]
+        if request.url.path == "/desktop/start":
+            token = request.query_params.get("token", "")
+            if secrets.compare_digest(token, desktop_token):
+                response = RedirectResponse("/", status_code=302)
+                response.set_cookie("desktop_key", desktop_token, httponly=True, samesite="strict")
+                response.headers["Cache-Control"] = "no-store"
+                response.headers["Referrer-Policy"] = "no-referrer"
+                return response
+        if not secrets.compare_digest(token, desktop_token):
+            return JSONResponse({"detail": "Open Aether from the desktop launcher"}, status_code=401)
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    app.mount("/static", StaticFiles(directory=ui_root / "static"), name="desktop-static")
+
+    @app.get("/{path:path}")
+    async def desktop_ui(path: str):
+        candidate = (ui_root / path).resolve()
+        if not candidate.is_relative_to(ui_root) or path.startswith("api/"):
+            raise HTTPException(status_code=404)
+        if candidate.is_file() and candidate.name != "index.html":
+            return FileResponse(candidate)
+        config = json.dumps({"bridgeUrl": os.environ["AETHER_BRIDGE_URL"]})
+        html = (ui_root / "index.html").read_text()
+        return HTMLResponse(html.replace("</head>", f"<script>window.__AETHER_DESKTOP__={config};</script></head>"))

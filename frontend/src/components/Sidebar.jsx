@@ -16,6 +16,7 @@ import {
   Menu,
   X,
   Usb,
+  Heart,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import { useAuth } from "../context/AuthContext";
@@ -28,16 +29,19 @@ const NAV_ITEMS = [
   { to: "/qualcomm", label: "Qualcomm Service", icon: Radio, testid: "nav-qualcomm" },
   { to: "/iphone", label: "iPhone Service", icon: Smartphone, testid: "nav-iphone" },
   { to: "/samsung", label: "Samsung Service", icon: Tablet, testid: "nav-samsung" },
+  { to: "/motorola", label: "Motorola Service", icon: Smartphone, testid: "nav-motorola" },
+  { to: "/firmware", label: "Firmware Service", icon: HardDriveDownload, testid: "nav-firmware" },
   { to: "/mtp", label: "MTP Mode", icon: Usb, testid: "nav-mtp" },
   { to: "/drivers", label: "Drivers & Tools", icon: HardDriveDownload, testid: "nav-drivers" },
   { to: "/logs", label: "Logs", icon: ScrollText, testid: "nav-logs" },
   { to: "/docs", label: "Documentation", icon: BookOpen, testid: "nav-docs" },
   { to: "/pricing", label: "Pricing & Credits", icon: CreditCard, testid: "nav-pricing" },
+  { to: "/donate", label: "Donate", icon: Heart, testid: "nav-donate" },
   { to: "/settings", label: "Settings", icon: Settings, testid: "nav-settings" },
 ];
 
 const LOGO_URL =
-  "https://static.prod-images.emergentagent.com/jobs/540cc9df-c50a-4a07-a460-6c88ca22b1a7/images/2d4119f8e681e91c440e01928176b55e52818652e44fd72f5f424ba935136d9c.png";
+  "/aether-logo.png";
 
 const BrandHeader = () => (
   <div className="px-5 py-5 border-b border-white/10">

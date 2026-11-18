@@ -87,3 +87,8 @@ frontend/node_modules/.cache/default-development/0.pack
 .env
 .env.*
 *.env
+
+# Desktop generated runtime and packaging outputs
+aether-desktop/src-tauri/runtime/
+aether-desktop/src-tauri/target/
+aether-desktop/build/

@@ -38,7 +38,7 @@ export default function FirmwareService() {
       return;
     }
     runAction(
-      "samsung_swclone",
+      "firmware_lookup",
       "Look up Samsung firmware",
       { args: ["inform", "--model", cleanModel, "--csc", cleanCsc] },
       "Free",

@@ -4,17 +4,11 @@ import { useAuth, formatApiError } from "../context/AuthContext";
 import { Mail, Lock, User as UserIcon, ArrowRight, AlertCircle, Loader2 } from "lucide-react";
 
 const LOGO_URL =
-  "https://static.prod-images.emergentagent.com/jobs/540cc9df-c50a-4a07-a460-6c88ca22b1a7/images/2d4119f8e681e91c440e01928176b55e52818652e44fd72f5f424ba935136d9c.png";
-
-// REMINDER: DO NOT HARDCODE THE URL, OR ADD ANY FALLBACKS OR REDIRECT URLS, THIS BREAKS THE AUTH
-const startGoogleAuth = () => {
-  const redirectUrl = window.location.origin + "/auth/callback";
-  window.location.href = `https://auth.emergentagent.com/?redirect=${encodeURIComponent(redirectUrl)}`;
-};
+  "/aether-logo.png";
 
 export default function Signup() {
   const navigate = useNavigate();
-  const { signupEmail } = useAuth();
+  const { signupEmail, startGoogleAuth } = useAuth();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -62,7 +56,7 @@ export default function Signup() {
 
             <button
               data-testid="signup-google-btn"
-              onClick={startGoogleAuth}
+              onClick={() => startGoogleAuth().catch((e) => setErr(formatApiError(e.response?.data?.detail || e.message)))}
               className="w-full h-11 border border-white/15 hover:border-[#00FF41]/40 hover:bg-[#00FF41]/5 text-white font-medium text-sm flex items-center justify-center gap-3 transition-colors"
             >
               <svg className="w-4 h-4" viewBox="0 0 48 48" aria-hidden="true">

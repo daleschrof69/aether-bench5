@@ -30,7 +30,7 @@ export function useCliBridge() {
   const earlyEventsRef = useRef(new Map()); // job_id → events that arrived before subscribe
   const reconnectRef = useRef(null);
 
-  const url =
+  const url = window.__AETHER_DESKTOP__?.bridgeUrl ||
     (typeof window !== "undefined" &&
       window.localStorage?.getItem("aether.bridge")) ||
     DEFAULT_URL;
@@ -41,16 +41,33 @@ export function useCliBridge() {
     typeof window !== "undefined" ? window.localStorage?.getItem("aether.bridge.enabled") : null;
   const enabled = enabledRaw == null ? true : enabledRaw === "1";
 
+  const rejectPending = useCallback(() => {
+    for (const pending of pendingRef.current.values()) {
+      clearTimeout(pending.timer);
+      pending.reject(new Error("CLI offline"));
+    }
+    pendingRef.current.clear();
+    earlyEventsRef.current.clear();
+    for (const sub of jobSubsRef.current.values()) {
+      sub({ stream: "done", exit_code: -1, line: "bridge disconnected" });
+    }
+    jobSubsRef.current.clear();
+  }, []);
+
   const cleanup = useCallback(() => {
     if (reconnectRef.current) {
       clearTimeout(reconnectRef.current);
       reconnectRef.current = null;
     }
     if (wsRef.current) {
+      wsRef.current.onclose = null;
+      wsRef.current.onopen = null;
+      wsRef.current.onmessage = null;
       try { wsRef.current.close(); } catch (e) { console.debug("[cli-bridge] socket close failed:", e); }
       wsRef.current = null;
     }
-  }, []);
+    rejectPending();
+  }, [rejectPending]);
 
   const connect = useCallback(() => {
     if (!enabled) return;
@@ -66,23 +83,29 @@ export function useCliBridge() {
     wsRef.current = ws;
 
     ws.onopen = () => {
+      if (wsRef.current !== ws) return;
       setStatus("connected");
       const id = ++rpcId;
-      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "hello", params: {} }));
+      const timer = setTimeout(() => ws.close(), 20000);
       pendingRef.current.set(id, {
+        timer,
         resolve: (res) => setInfo(res),
         reject: () => setInfo(null),
       });
+      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method: "hello", params: {} }));
     };
 
     ws.onmessage = (msg) => {
+      if (wsRef.current !== ws) return;
       let payload;
       try { payload = JSON.parse(msg.data); } catch { return; }
 
+      if (!payload || typeof payload !== "object") return;
       // Response to a previous call() — resolve its promise.
       if (payload.id != null && pendingRef.current.has(payload.id)) {
         const pending = pendingRef.current.get(payload.id);
         pendingRef.current.delete(payload.id);
+        clearTimeout(pending.timer);
         if (payload.error) {
           const message = payload.error.message || payload.error.error || "CLI error";
           pending.reject(new Error(typeof message === "string" ? message : "CLI error"));
@@ -112,22 +135,14 @@ export function useCliBridge() {
 
     ws.onerror = () => { /* will trigger onclose */ };
     ws.onclose = () => {
+      if (wsRef.current !== ws) return;
       setStatus("offline");
       setInfo(null);
       wsRef.current = null;
-      // Reject all pending RPCs + job subs so callers don't hang.
-      for (const pending of pendingRef.current.values()) {
-        pending.reject(new Error("CLI offline"));
-      }
-      pendingRef.current.clear();
-      earlyEventsRef.current.clear();
-      for (const sub of jobSubsRef.current.values()) {
-        sub({ stream: "done", exit_code: -1, line: "bridge disconnected" });
-      }
-      jobSubsRef.current.clear();
+      rejectPending();
       reconnectRef.current = setTimeout(connect, 5000);
     };
-  }, [enabled, url]);
+  }, [enabled, url, rejectPending]);
 
   const call = useCallback((method, params = {}) => {
     return new Promise((resolve, reject) => {
@@ -137,14 +152,18 @@ export function useCliBridge() {
         return;
       }
       const id = ++rpcId;
-      pendingRef.current.set(id, { resolve, reject });
-      ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
-      setTimeout(() => {
-        if (pendingRef.current.has(id)) {
-          pendingRef.current.delete(id);
-          reject(new Error("CLI timeout"));
-        }
+      const timer = setTimeout(() => {
+        pendingRef.current.delete(id);
+        reject(new Error("CLI timeout"));
       }, 20000);
+      pendingRef.current.set(id, { resolve, reject, timer });
+      try {
+        ws.send(JSON.stringify({ jsonrpc: "2.0", id, method, params }));
+      } catch (error) {
+        clearTimeout(timer);
+        pendingRef.current.delete(id);
+        reject(error);
+      }
     });
   }, []);
 
@@ -158,13 +177,24 @@ export function useCliBridge() {
     return new Promise((resolve, reject) => {
       (async () => {
         try {
+          const socket = wsRef.current;
           const res = await call(method, params);
           if (!res?.job_id) {
             reject(new Error(res?.message || "job did not start"));
             return;
           }
+          if (wsRef.current !== socket || socket?.readyState !== WebSocket.OPEN) {
+            reject(new Error("CLI offline"));
+            return;
+          }
           const jobId = res.job_id;
+          let completed = false;
           const deliver = (ev) => {
+            if (completed) return;
+            if (ev.stream === "done") {
+              completed = true;
+              jobSubsRef.current.delete(jobId);
+            }
             try { onEvent?.(ev); } catch (err) { console.error("[cli-bridge] job onEvent callback threw:", err); }
             if (ev.stream === "done") {
               resolve(ev.exit_code);
@@ -182,7 +212,11 @@ export function useCliBridge() {
   }, [call]);
 
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      setStatus("offline");
+      setInfo(null);
+      return;
+    }
     connect();
     return cleanup;
   }, [enabled, connect, cleanup]);

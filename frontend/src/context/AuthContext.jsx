@@ -1,7 +1,7 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import axios from "axios";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 
 // Axios instance: always send cookies
 const http = axios.create({ baseURL: API, withCredentials: true });
@@ -40,11 +40,6 @@ export const AuthProvider = ({ children }) => {
   }, []);
 
   useEffect(() => {
-    // If returning from Emergent OAuth callback, AuthCallback handles the exchange first.
-    if (window.location.hash?.includes("session_id=")) {
-      setLoading(false);
-      return;
-    }
     refresh();
   }, [refresh]);
 
@@ -60,11 +55,11 @@ export const AuthProvider = ({ children }) => {
     return data;
   };
 
-  const exchangeEmergentSession = async (session_id) => {
-    const { data } = await http.post("/auth/session", { session_id });
-    setUser(data);
-    return data;
-  };
+  const startGoogleAuth = useCallback(async () => {
+    const { data } = await http.get("/auth/providers");
+    if (!data.google) throw new Error("Google sign-in is not configured. Use email and password.");
+    window.location.assign(`${API}/auth/google`);
+  }, []);
 
   const logout = async () => {
     try {
@@ -102,11 +97,11 @@ export const AuthProvider = ({ children }) => {
       noteCredits,
       loginEmail,
       signupEmail,
-      exchangeEmergentSession,
+      startGoogleAuth,
       logout,
       http,
     }),
-    [user, loading, refresh, syncProfile, noteCredits]
+    [user, loading, refresh, syncProfile, noteCredits, startGoogleAuth]
   );
 
   return (

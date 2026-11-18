@@ -47,11 +47,11 @@ fn adb_plan(args: &[&str]) -> Result<Planned, String> {
 
 fn fastboot_plan(args: &[&str]) -> Result<Planned, String> {
     match args {
-        ["devices"] => planned(FASTBOOT, args),
+        ["devices"] | ["oem", "get_unlock_data"] => planned(FASTBOOT, args),
         ["getvar", "all" | "product" | "version" | "version-bootloader" | "secure" | "unlocked"] => {
             planned(FASTBOOT, args)
         }
-        _ => Err("fastboot command is not in the official set (devices, getvar all|product|version|version-bootloader|secure|unlocked)".into()),
+        _ => Err("fastboot command is not in the official set (devices, oem get_unlock_data, getvar all|product|version|version-bootloader|secure|unlocked)".into()),
     }
 }
 
@@ -211,6 +211,7 @@ mod tests {
         assert!(plan("adb", &words(&["devices", "-l"])).is_ok());
         assert!(plan("adb", &words(&["reboot", "download"])).is_ok());
         assert!(plan("fastboot", &words(&["getvar", "unlocked"])).is_ok());
+        assert_eq!(plan("fastboot", &words(&["oem", "get_unlock_data"])).unwrap().args, words(&["oem", "get_unlock_data"]));
         assert!(plan("heimdall", &words(&["close-pc-screen"])).is_ok());
         assert!(plan("apple", &words(&["pair", "validate"])).is_ok());
     }
@@ -220,6 +221,7 @@ mod tests {
         assert!(plan("adb", &words(&["shell", "rm", "-rf", "/"])).is_err());
         assert!(plan("adb", &words(&["reboot", "edl"])).is_err());
         assert!(plan("fastboot", &words(&["oem", "unlock"])).is_err());
+        assert!(plan("fastboot", &words(&["oem", "get_unlock_data", "extra"])).is_err());
         assert!(plan("heimdall", &words(&["flash", "--AP", "firmware.tar"])).is_err());
         assert!(plan("apple", &words(&["restore", "custom.ipsw"])).is_err());
     }

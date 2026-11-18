@@ -5,7 +5,7 @@ import { useApp } from "../context/AppContext";
 import { Smartphone, AlertTriangle, ShieldCheck, Lock, Activity, Search, Loader2 } from "lucide-react";
 
 const LOGO_URL =
-  "https://static.prod-images.emergentagent.com/jobs/540cc9df-c50a-4a07-a460-6c88ca22b1a7/images/2d4119f8e681e91c440e01928176b55e52818652e44fd72f5f424ba935136d9c.png";
+  "/aether-logo.png";
 
 const SUPPORTED = [
   "iPhone XS", "iPhone XR", "iPhone 11", "iPhone 11 Pro", "iPhone SE 2", "iPhone 12",

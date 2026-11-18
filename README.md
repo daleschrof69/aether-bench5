@@ -1,8 +1,15 @@
 # Aether Repair Tool
 
-Desktop-style mobile-repair suite (MTK · Qualcomm · Samsung · iPhone) with a
-React dashboard, FastAPI backend, and a native Rust CLI / Tauri desktop bridge
-that talks to USB devices (BROM / EDL / DFU / Download mode) directly.
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:bc504711e5664dae5a8d6d9436750bbc071a3b104d483219ef1f6f14dcd0ee81 -->
+
+Windows desktop mobile-repair suite (MTK · Qualcomm · Samsung · iPhone), with
+an installed Tauri application, bundled interface/API/CLI, and local SQLite
+workspace. See [Desktop build and installation](aether-desktop/README.md).
+Device-specific drivers and external repair tools retain their setup steps.
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 > ## ⚠️ AUTHORIZED PERSONAL USE ONLY
 > Copyright (c) 2026 Braiden Barker. All rights reserved.
@@ -11,26 +18,32 @@ that talks to USB devices (BROM / EDL / DFU / Download mode) directly.
 > availability is prohibited. Use only on devices you own or are explicitly
 > authorized to service. See [LICENSE.md](./LICENSE.md).
 
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:3aafe90dd2a83248b690cc92664dde7f6a19e94769fbf832a216a711989a8868 -->
+
 ## Structure
 
+```text
+backend/          FastAPI API; SQLite for desktop, MongoDB for hosted development
+frontend/         Interface compiled into the desktop installer
+aether-cli/       Native Rust USB/JSON-RPC bridge
+aether-desktop/   Tauri application, local runtime packaging, Windows MSI/EXE builds
+.github/workflows Windows desktop artifact build and standalone CLI pipelines
 ```
-backend/          FastAPI + MongoDB (auth, Stripe credits, health, source download)
-frontend/         React + Shadcn UI dashboard
-aether-cli/       Rust CLI — real USB bridge (rusb/libusb), JSON-RPC WebSocket
-aether-desktop/   Tauri 2 desktop wrapper (Rust)
-.github/workflows Native build pipelines (desktop .msi / .dmg / .AppImage, CLI)
-```
 
-## How device I/O actually works
+## Install and run
 
-- The **hosted web app** runs on a remote server with no physical USB — it
-  cannot flash a phone. It offers WebUSB *detection* only.
-- **Real repair** runs through `aether-cli` (native Rust binary) on your own
-  machine; the dashboard connects to it via a local WebSocket bridge.
-- Native installers are produced by the GitHub Actions workflows (push a
-  `desktop-vX.Y.Z` / `vX.Y.Z` tag after connecting the repo).
+Build the Windows installer with the commands in
+[aether-desktop/README.md](aether-desktop/README.md), then launch Aether from the
+Start menu. The installed window starts its bundled API and CLI, stores the
+workspace locally, and uses the connected computer's USB devices. Drivers and
+external vendor tools must be installed for the device operations that need them.
 
-## Downloads
+The Windows workflow uploads installer artifacts for review. It does not publish
+releases automatically. Windows installation and physical device operations must
+be verified before release. See [BUILD.md](BUILD.md) for the development server
+commands; the installed application does not depend on those servers.
 
-- **Full source (.zip)** — `GET /api/download/source` (fresh, secrets excluded).
-- **Native builds** — published to GitHub Releases by the CI workflows.
+
+<!-- /coderabbit-ai-generated:v1 -->

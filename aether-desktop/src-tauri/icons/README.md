@@ -32,14 +32,19 @@ icons/
 
 Commit them all to git after generation. Done — `yarn build:msi` will work.
 
-## Quick placeholder (until you have proper artwork)
+<!-- coderabbit-ai-generated:v1 -->
 
-If you just want to test the build pipeline, you can use the Aether logo PNG
-from the web app:
+<!-- coderabbit-ai-generated-section:v1:dc1c2d144eab02e2dfdeffea3386f42cfb4d60012fe40bb5e3f8a03e4b6f64c0 -->
+
+## Use the included artwork
+
+From `aether-desktop/`, copy the locally bundled logo to the icon source path:
 
 ```bash
-curl -L -o src-tauri/icons/source.png \
-  "https://static.prod-images.emergentagent.com/jobs/540cc9df-c50a-4a07-a460-6c88ca22b1a7/images/2d4119f8e681e91c440e01928176b55e52818652e44fd72f5f424ba935136d9c.png"
+cp ../frontend/public/aether-logo.png src-tauri/icons/source.png
 ```
 
-That image is ~512×512 — Tauri will upscale, but the result will be slightly soft. Replace with proper 1024² artwork before shipping.
+The web app includes its own logo file and needs no hosted image service.
+
+
+<!-- /coderabbit-ai-generated:v1 -->

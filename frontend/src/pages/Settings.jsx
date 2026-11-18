@@ -4,7 +4,7 @@ import { Settings as SettingsIcon, ShieldCheck, Bell, Usb, Database, Info, Wrenc
 import DeployStatus from "../components/DeployStatus";
 import { toast } from "sonner";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 
 const Toggle = ({ checked, onChange, testid }) => (
   <button

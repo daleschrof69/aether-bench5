@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Activity, GitCommit, Database, Clock } from "lucide-react";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const POLL_MS = 30_000;
 
 /**

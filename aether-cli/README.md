@@ -86,32 +86,26 @@ that mirror what real implementations expose. To add real behaviour:
 
 ## Integration with the Aether web dashboard
 
-1. User installs the CLI on their workstation.
-2. User runs `aether-cli serve` (or it's auto-started by the installer).
-3. The web dashboard (https://mtk-qualcomm-tool.emergent.host) connects to
-   `ws://127.0.0.1:8765` and sends JSON commands like:
+<!-- coderabbit-ai-generated:v1 -->
 
-   ```json
-   { "cmd": "scan" }
-   { "cmd": "info", "port": "auto" }
-   { "cmd": "bypass-frp", "port": "auto" }
-   ```
+<!-- coderabbit-ai-generated-section:v1:4ef5eef0349225d6be21436e6774afd8631e853b5e7baf215b5b56f3af9ea661 -->
 
-4. The CLI streams responses back as newline-delimited JSON events.
-5. The dashboard's existing Console / DeviceStatus / ActionGrid render those
-   events in real time.
+The local dashboard at `http://localhost:3000` connects to the CLI at
+`ws://127.0.0.1:8765`. Run `aether-cli serve` on the computer with the device.
+The bridge uses JSON-RPC 2.0, for example:
 
-To switch the dashboard from demo mode to real mode, set in the browser console:
-
-```js
-localStorage.setItem('aether.bridge', 'ws://127.0.0.1:8765');
-location.reload();
+```json
+{"jsonrpc":"2.0","id":1,"method":"hello","params":{}}
+{"jsonrpc":"2.0","id":2,"method":"devices","params":{}}
 ```
 
-(That hook isn't wired yet in the React app — it's the natural next step once
-the CLI is publishing real binaries.)
+The dashboard connects automatically. To configure a different local endpoint,
+set `localStorage.aether.bridge`; set `aether.bridge.enabled` to `"0"` to disable
+connection attempts. Device jobs publish progress through event notifications.
 
 ---
+
+<!-- /coderabbit-ai-generated:v1 -->
 
 ## Releasing binaries
 

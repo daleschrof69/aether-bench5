@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import { Download, X, Monitor, Apple, Cpu, Check, Bell, Loader2 } from "lucide-react";
 import { DESKTOP_VERSION as VERSION } from "../lib/releases";
 
-const API = `${process.env.REACT_APP_BACKEND_URL}/api`;
+const API = `${process.env.REACT_APP_BACKEND_URL || ""}/api`;
 const STORAGE_KEY = "aether.hero.getDesktop.dismissed";
 const WAITLIST_STORAGE_KEY = "aether.hero.getDesktop.waitlisted";
 

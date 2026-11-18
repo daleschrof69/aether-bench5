@@ -1,10 +1,10 @@
-"""Aether backend tests: auth (JWT, signup, login, lockout, logout, me, emergent session) + stripe pricing/checkout/status."""
+"""Aether backend tests: auth (JWT, signup, login, lockout, logout, me, retired hosted session) + stripe pricing/checkout/status."""
 import os
 import uuid
 import pytest
 import requests
 
-BASE_URL: str = os.environ.get("REACT_APP_BACKEND_URL", "https://mtk-qualcomm-tool.preview.emergentagent.com").rstrip("/")
+BASE_URL: str = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:3000").rstrip("/")
 API: str = f"{BASE_URL}/api"
 
 ADMIN_EMAIL: str = os.environ.get("AETHER_TEST_ADMIN_EMAIL", "admin@aether.dev")
@@ -100,15 +100,15 @@ class TestBruteForce:
         assert last_status == 429, f"Expected 429 after 6 fails, got {last_status}"
 
 
-# ──────────────── Emergent session exchange ────────────────
-class TestEmergentSession:
-    def test_session_missing_session_id_returns_400(self) -> None:
+# ──────────────── Retired hosted session exchange ────────────────
+class TestRetiredHostedSession:
+    def test_session_missing_session_id_returns_410(self) -> None:
         r = requests.post(f"{API}/auth/session", json={})
-        assert r.status_code == 400
+        assert r.status_code == 410
 
-    def test_session_invalid_session_id_returns_401(self) -> None:
+    def test_session_invalid_session_id_returns_410(self) -> None:
         r = requests.post(f"{API}/auth/session", json={"session_id": "invalid_garbage_xyz"})
-        assert r.status_code == 401
+        assert r.status_code == 410
 
 
 # ──────────────── Stripe pricing ────────────────

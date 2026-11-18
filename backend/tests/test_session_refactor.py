@@ -1,17 +1,13 @@
-"""Iteration 12 — verify emergent OAuth session endpoint refactor.
+"""Hosted session exchange is retired; local JWT authentication is preserved.
 
-The endpoint POST /api/auth/session was split into three helpers:
-_fetch_emergent_profile / _upsert_google_user / _persist_emergent_session.
-Public behavior must be unchanged:
-  * missing body / missing session_id -> 400
-  * invalid session_id (upstream Emergent oauth rejects) -> 401
-Plus a smoke check that login (JWT auth) and /api/auth/me still work.
+Vendor removal intentionally replaces the former 400/401 session exchange
+contract with 410 for all requests. Google now uses /api/auth/google.
 """
 import os
 import pytest
 import requests
 
-BASE_URL: str = os.environ.get("REACT_APP_BACKEND_URL", "").rstrip("/")
+BASE_URL: str = os.environ.get("REACT_APP_BACKEND_URL", "http://localhost:3000").rstrip("/")
 ADMIN_EMAIL: str = os.environ.get("AETHER_TEST_ADMIN_EMAIL", "admin@aether.dev")
 ADMIN_PASSWORD: str = os.environ.get("AETHER_TEST_ADMIN_PASSWORD", "aether_admin_2026")
 
@@ -29,25 +25,11 @@ class TestAuthSessionRefactor:
         r = api_client.get(f"{BASE_URL}/api/")
         assert r.status_code == 200
 
-    def test_session_empty_body_returns_400(self, api_client: requests.Session) -> None:
-        r = api_client.post(f"{BASE_URL}/api/auth/session", data="{}")
-        assert r.status_code == 400
-        detail = r.json().get("detail", "")
-        assert "session_id" in detail.lower()
-
-    def test_session_missing_session_id_returns_400(self, api_client: requests.Session) -> None:
-        r = api_client.post(f"{BASE_URL}/api/auth/session", json={"other": "x"})
-        assert r.status_code == 400
-
-    def test_session_invalid_session_id_returns_401(self, api_client: requests.Session) -> None:
-        r = api_client.post(
-            f"{BASE_URL}/api/auth/session",
-            json={"session_id": "definitely-not-a-real-session-id-xyz"},
-        )
-        # Upstream Emergent oauth will 401 on a bogus session_id
-        assert r.status_code == 401
-        detail = r.json().get("detail", "")
-        assert "session_id" in detail.lower() or "invalid" in detail.lower()
+    @pytest.mark.parametrize("payload", [{}, {"other": "x"}, {"session_id": "retired"}])
+    def test_hosted_session_exchange_is_retired(self, api_client, payload):
+        r = api_client.post(f"{BASE_URL}/api/auth/session", json=payload)
+        assert r.status_code == 410
+        assert "retired" in r.json()["detail"].lower()
 
 
 # ── Smoke test — the rest of auth must still work post-refactor ───────────

@@ -31,20 +31,35 @@ curl -b /tmp/admin.txt $BACKEND_URL/api/auth/me
 ```
 Expect role=`admin`, plan=`founding_builder`, credits=`5000`.
 
-## 4. Emergent Google OAuth (mocked path)
-Backend route: `POST /api/auth/session` with `{ session_id }` exchanges to `session_token` cookie.
-For browser test, simulate by inserting a session document directly:
-```
-mongosh --eval "
-use('test_database');
-const uid = 'user_'+Date.now();
-db.users.insertOne({user_id: uid, email:'google.tester@example.com', name:'GTester', role:'user', plan:'free', credits:100, provider:'google', created_at: new Date()});
-db.user_sessions.insertOne({user_id: uid, session_token:'test_session_xyz', expires_at: new Date(Date.now()+7*86400000), created_at: new Date()});
-"
-curl -b "session_token=test_session_xyz" $BACKEND_URL/api/auth/me
+<!-- coderabbit-ai-generated:v1 -->
+
+<!-- coderabbit-ai-generated-section:v1:aee15ec0e3299cf29be4797501809761f82ee53b4ebab747e707d52ca3bfc4cd -->
+
+## 4. Direct Google OAuth
+
+Configure your own client using BUILD.md. Open `/login` and choose Google.
+Confirm the authorization page belongs to Google and the callback returns to
+Aether with HttpOnly JWT cookies. Wrong, missing or expired state must fail.
+A Google account without a verified email must fail. No provider credentials
+are needed for email/password login. The old `/api/auth/session` returns 410.
+
+Automated provider and database checks use synthetic responses, with no real
+payment or Google account:
+
+```bash
+cd backend
+python -m unittest discover -s tests -p test_owned_integrations.py
 ```
 
+MongoDB must be running at `AETHER_TEST_MONGO_URL` (default localhost:27017).
+Each test creates and removes its own randomly named database. These checks
+verify signatures, replay protection, concurrent fulfillment, OAuth state and
+PKCE, and preservation of local email authentication. Live provider setup is
+still a separate deployment check.
+
 ## 5. Stripe checkout
+
+<!-- /coderabbit-ai-generated:v1 -->
 ```
 curl -b /tmp/c.txt -X POST $BACKEND_URL/api/stripe/checkout \
   -H "Content-Type: application/json" \

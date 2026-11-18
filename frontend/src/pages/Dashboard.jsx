@@ -65,7 +65,7 @@ export default function Dashboard() {
         <div className="lg:col-span-5 h-auto min-h-0 lg:h-full overflow-visible lg:overflow-y-auto">
           <DeviceStatus />
           <div className="mt-3 space-y-3">
-            <GetDesktopHeroCard />
+            {process.env.REACT_APP_DESKTOP !== "true" && <GetDesktopHeroCard />}
             <FoundingBuilderBanner />
           </div>
         </div>

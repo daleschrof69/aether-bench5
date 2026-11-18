@@ -4,9 +4,9 @@
   "version": "0.1.0",
   "identifier": "dev.aether.repair",
   "build": {
-    "beforeDevCommand": "",
-    "beforeBuildCommand": "",
-    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "node scripts/prepare.mjs",
+    "beforeBuildCommand": "node scripts/prepare.mjs",
+    "devUrl": null,
     "frontendDist": "../public"
   },
   "app": {
@@ -15,7 +15,7 @@
       {
         "title": "Aether Repair Tool",
         "label": "main",
-        "url": "http://localhost:3000",
+        "url": "index.html",
         "width": 1600,
         "height": 1000,
         "minWidth": 1100,
@@ -39,14 +39,16 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["msi", "nsis", "deb", "appimage", "dmg"],
+    "targets": [
+      "msi",
+      "nsis"
+    ],
     "category": "DeveloperTool",
-    "shortDescription": "Aether Repair Tool — MTK / Qualcomm / iPhone / Samsung repair console.",
-    "longDescription": "Unified repair console for licensed technicians. Bundles the Aether web dashboard with the local CLI bridge so the dashboard talks to USB devices directly — no browser required.",
-    "copyright": "© 2026 Aether Labs",
+    "shortDescription": "Aether Repair Tool \u2014 MTK / Qualcomm / iPhone / Samsung repair console.",
+    "longDescription": "Unified repair console for licensed technicians. Bundles the Aether web dashboard with the local CLI bridge so the dashboard talks to USB devices directly \u2014 no browser required.",
+    "copyright": "\u00a9 2026 Aether Labs",
     "license": "Proprietary",
     "publisher": "Aether Labs",
-    "homepage": "http://localhost:3000",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -56,8 +58,10 @@
     ],
     "windows": {
       "wix": {
-        "language": ["en-US"],
-        "upgradeCode": "12345678-1234-1234-1234-1234567890AB"
+        "language": [
+          "en-US"
+        ],
+        "upgradeCode": "468C488B-6CF2-53FC-9348-8046F90E2C02"
       },
       "nsis": {
         "installerIcon": "icons/icon.ico",
@@ -74,8 +78,19 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
       }
+    },
+    "resources": {
+      "runtime/": "runtime/",
+      "../../frontend/build/": "dashboard/",
+      "../../LICENSE.md": "LICENSE.md",
+      "../../aether-cli/NOTICE.md": "NOTICE.md",
+      "../../aether-cli/backend/exploits/": "backend/exploits/",
+      "../../backend/swclone.py": "backend/swclone.py"
     }
   }
 }

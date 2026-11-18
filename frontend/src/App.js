@@ -15,14 +15,16 @@ import MTKService from "./pages/MTKService";
 import QualcommService from "./pages/QualcommService";
 import IPhoneService from "./pages/IPhoneService";
 import SamsungService from "./pages/SamsungService";
+import FirmwareService from "./pages/FirmwareService";
+import MotorolaService from "./pages/MotorolaService";
 import MTPService from "./pages/MTPService";
 import Logs from "./pages/Logs";
 import Drivers from "./pages/Drivers";
 import Pricing from "./pages/Pricing";
+import Donate from "./pages/Donate";
 import Settings from "./pages/Settings";
 import Login from "./pages/Login";
 import Signup from "./pages/Signup";
-import AuthCallback from "./pages/AuthCallback";
 import PaymentSuccess from "./pages/PaymentSuccess";
 import PaymentCancel from "./pages/PaymentCancel";
 import Terms from "./pages/Terms";
@@ -48,10 +50,13 @@ function AppShell() {
               <Route path="/qualcomm" element={<QualcommService />} />
               <Route path="/iphone" element={<IPhoneService />} />
               <Route path="/samsung" element={<SamsungService />} />
+              <Route path="/firmware" element={<FirmwareService />} />
+              <Route path="/motorola" element={<MotorolaService />} />
               <Route path="/mtp" element={<MTPService />} />
               <Route path="/drivers" element={<Drivers />} />
               <Route path="/logs" element={<Logs />} />
               <Route path="/pricing" element={<Pricing />} />
+              <Route path="/donate" element={<Donate />} />
               <Route path="/docs" element={<DocsHub />} />
               <Route path="/docs/:slug" element={<DocArticle />} />
               <Route path="/terms" element={<Terms />} />
@@ -69,17 +74,11 @@ function AppShell() {
   );
 }
 
-// Detect OAuth callback fragment synchronously during render to avoid race conditions
 function AppRouter() {
-  const location = useLocation();
-  if (location.hash?.includes("session_id=")) {
-    return <AuthCallback />;
-  }
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/signup" element={<Signup />} />
-      <Route path="/auth/callback" element={<AuthCallback />} />
       <Route path="/payment/success" element={<PaymentSuccess />} />
       <Route path="/payment/cancel" element={<PaymentCancel />} />
       <Route path="*" element={<AppShell />} />

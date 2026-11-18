@@ -53,34 +53,17 @@
     </style>
   </head>
   <body>
-    <!--
-      Tauri 2 requires a valid frontendDist with an index.html for `tauri build`.
-      The real app is loaded from `app.windows[0].url` in tauri.conf.json — this
-      file is only shown if that URL fails (offline, DNS down, server unreachable),
-      and acts as a graceful "trying to reach Aether" fallback.
-    -->
     <div class="wrap">
-      <div class="spinner" aria-hidden="true"></div>
+      <div id="spinner" class="spinner" aria-hidden="true"></div>
       <h1>Aether Repair Tool</h1>
-      <p id="msg">Connecting to console&hellip;</p>
-      <p style="opacity:.5">
-        If this screen persists, the local console is not running.
-        <a href="http://localhost:3000" id="link">Open localhost:3000</a>
-      </p>
+      <p id="msg" role="status">Starting your repair bench&hellip;</p>
+      <p>Your workspace is stored on this computer.</p>
     </div>
     <script>
-      // Hard fallback: if Tauri didn't load the remote URL within 6s, try to
-      // redirect manually so the user isn't stuck on the splash.
-      var REMOTE = "http://localhost:3000";
-      setTimeout(function () {
-        try {
-          if (location.href.indexOf("tauri.localhost") === 0 ||
-              location.protocol === "tauri:" ||
-              location.protocol === "file:") {
-            location.replace(REMOTE);
-          }
-        } catch (_) {}
-      }, 6000);
+      if (window.aetherStartupError) {
+        document.getElementById('msg').textContent = window.aetherStartupError;
+        document.getElementById('spinner').hidden = true;
+      }
     </script>
   </body>
 </html>
